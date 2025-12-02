@@ -6,5 +6,12 @@
     <color name="primary">#FF682C</color>
     <color name="neutral_dark">#A4A7AE</color>
     <color name="neutral_light">#FDFDFD</color>
+    
+    <!-- Additional colors for vector screen -->
+    <color name="left_panel_bg">#2C2C2C</color>
+    <color name="red_single">#F44336</color>
+    <color name="header_bg">#FFFFFF</color>
+    <color name="text_primary">#000000</color>
+    <color name="text_secondary">#666666</color>
 
 </resources>

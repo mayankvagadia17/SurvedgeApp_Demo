@@ -7,10 +7,13 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.text.InputType
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
@@ -38,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.CoroutineContext
 import android.os.Handler
 import android.os.Looper
+import com.nexova.survedgeapp.R
 import kotlin.jvm.JvmField
 
 class MappingFragment : Fragment() {
@@ -81,11 +85,17 @@ class MappingFragment : Fragment() {
         // Initialize map
         initializeMap()
         
+        // Setup header controls
+        setupHeaderControls()
+        
+        // Setup left control panel
+        setupLeftControlPanel()
+        
         // Setup zoom controls
         setupZoomControls()
         
-        // Setup generate points button
-        setupGenerateButton()
+        // Setup collect button
+        setupCollectButton()
         
         // Observe ViewModel
         observeViewModel()
@@ -100,6 +110,8 @@ class MappingFragment : Fragment() {
         // Configure osmdroid for Android 11+ compatibility with high-quality tiles
         mapView?.setTileSource(TileSourceFactory.MAPNIK) // OpenStreetMap tiles
         mapView?.setMultiTouchControls(true)
+
+        mapView?.zoomController?.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
         
         // Enable hardware acceleration for better performance and tile quality
         mapView?.isHorizontalMapRepetitionEnabled = false
@@ -226,6 +238,16 @@ class MappingFragment : Fragment() {
         
         isMapReady.set(true)
         
+        // Hide built-in zoom controls after map is ready
+        view?.postDelayed({
+            try {
+                // Hide via zoomController property
+                mapView?.zoomController?.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+            } catch (e: Exception) {
+                Log.d("MappingFragment", "Could not hide zoom controls: ${e.message}")
+            }
+        }, 200) // Delay to ensure map is fully initialized
+        
         // For Android 11+, ensure tiles are properly scaled after map is ready
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             view?.postDelayed({
@@ -243,6 +265,29 @@ class MappingFragment : Fragment() {
         centerOnCurrentLocationOrDefault()
     }
 
+    private fun setupHeaderControls() {
+        // Back button
+        binding.btnBack.setOnClickListener {
+            activity?.onBackPressedDispatcher?.onBackPressed()
+        }
+        
+        // Menu button with popup
+        binding.btnMenu.setOnClickListener { view ->
+            showMenuPopup(view)
+        }
+    }
+    
+    private fun setupLeftControlPanel() {
+        // Play/Pause button
+        binding.btnPlayPause.setOnClickListener {
+            // Toggle play/pause state
+        }
+        
+        // Single button
+        binding.btnSingle.setOnClickListener {
+        }
+    }
+    
     private fun setupZoomControls() {
         binding.btnZoomIn.setOnClickListener {
             mapView?.let { map ->
@@ -264,7 +309,22 @@ class MappingFragment : Fragment() {
         
         binding.btnCenter.setOnClickListener {
             mapView?.let { map ->
-                // Center on all points if available
+                // Center on current location if available
+                val currentLocation = viewModel.currentLocation.value
+                if (currentLocation != null) {
+                    centerOnLocation(currentLocation)
+                } else {
+                    // Default center (Delhi area) if location is not available
+                    mapController?.setCenter(GeoPoint(28.7041, 77.1025))
+                    mapController?.setZoom(13.0)
+                }
+            }
+        }
+        
+        // Fit bounds button
+        binding.btnFitBounds.setOnClickListener {
+            mapView?.let { map ->
+                // Fit to all points if available
                 val points = viewModel.points.value
                 if (points?.isNotEmpty() == true) {
                     val bounds = org.osmdroid.util.BoundingBox.fromGeoPoints(
@@ -272,24 +332,39 @@ class MappingFragment : Fragment() {
                     )
                     map.zoomToBoundingBox(bounds, true, 100)
                 } else {
-                    // Center on current location if available, otherwise use default
-                    val currentLocation = viewModel.currentLocation.value
-                    if (currentLocation != null) {
-                        centerOnLocation(currentLocation)
-                    } else {
-                        // Default center (Delhi area) if location is not available
-                        mapController?.setCenter(GeoPoint(28.7041, 77.1025))
-                        mapController?.setZoom(13.0)
-                    }
+                    Toast.makeText(requireContext(), "No points to fit", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
-
-    private fun setupGenerateButton() {
-        binding.btnGeneratePoints.setOnClickListener {
+    
+    private fun setupCollectButton() {
+        binding.btnCollect.setOnClickListener {
             showGeneratePointsDialog()
         }
+    }
+    
+    private fun showMenuPopup(view: View) {
+        val popup = PopupMenu(requireContext(), view, Gravity.END)
+        popup.menuInflater.inflate(R.menu.mapping_menu, popup.menu)
+        
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.menu_object_list -> {
+                    // TODO: Show object list
+                    Toast.makeText(requireContext(), "Object list", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                R.id.menu_project_details -> {
+                    // TODO: Show project details
+                    Toast.makeText(requireContext(), "Project details", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                else -> false
+            }
+        }
+        
+        popup.show()
     }
     
     private fun showGeneratePointsDialog() {
@@ -350,11 +425,11 @@ class MappingFragment : Fragment() {
         }
         
         viewModel.isGeneratingPoints.observe(viewLifecycleOwner) { isGenerating ->
-            binding.btnGeneratePoints.isEnabled = !isGenerating
-            binding.btnGeneratePoints.text = if (isGenerating) {
-                "Generating..."
+            binding.btnCollect.isEnabled = !isGenerating
+            binding.btnCollect.text = if (isGenerating) {
+                "Collecting..."
             } else {
-                "Generate Points"
+                "Collect"
             }
         }
         

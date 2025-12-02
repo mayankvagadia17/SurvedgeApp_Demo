@@ -1,84 +1,352 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".ui.mapping.fragment.MappingFragment">
 
+    <!-- Map View -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Header Bar -->
+    <LinearLayout
+        android:id="@+id/headerBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:elevation="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Back Arrow -->
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Back"
+            android:padding="8dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_back_arrow" />
+
+        <!-- Project Name -->
+        <TextView
+            android:id="@+id/tvProjectName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="Block no.25 TPS-20 - Delhi"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- Menu Dots -->
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Menu"
+            android:padding="8dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_menu_dots" />
+    </LinearLayout>
+
+    <!-- Left Control Panel -->
+    <LinearLayout
+        android:id="@+id/leftControlPanel"
+        android:layout_width="40dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/left_panel_background"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:elevation="4dp"
+        android:orientation="vertical"
+        android:padding="4dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/headerBar">
+
+        <!-- My Surv 01-rover (Vertical Text) -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginBottom="8dp"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:minHeight="150dp">
+
+            <TextView
+                android:id="@+id/tvRoverName"
+                android:layout_width="150dp"
+                android:layout_height="27dp"
+                android:layout_gravity="center"
+                android:ellipsize="none"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:rotation="90"
+                android:singleLine="true"
+                android:text="My Surv 01-rover"
+                android:textAlignment="center"
+                android:textColor="@color/white"
+                android:textSize="12sp" />
+        </FrameLayout>
+
+        <!-- Separator Line -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginBottom="8dp"
+            android:alpha="0.3"
+            android:background="@color/white" />
+
+        <!-- Play/Pause Button -->
+        <ImageButton
+            android:id="@+id/btnPlayPause"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center"
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/orange_rounded_button"
+            android:contentDescription="Play/Pause"
+            android:padding="6dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_play_pause" />
+
+        <!-- Separator Line -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginBottom="8dp"
+            android:alpha="0.3"
+            android:background="@color/white" />
+
+        <!-- Single Button (Red Circle) -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginBottom="8dp"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <View
+                android:id="@+id/btnSingle"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_gravity="center"
+                android:background="@drawable/red_dot_background" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="Single"
+                android:textColor="@color/white"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Separator Line -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginBottom="8dp"
+            android:alpha="0.3"
+            android:background="@color/white" />
+
+        <!-- Antenna/Signal Icon with Number -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginBottom="8dp"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="Signal"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_person"
+                app:tint="@color/white" />
+
+            <TextView
+                android:id="@+id/tvPersonCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="32"
+                android:textColor="@color/white"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
 
     <!-- Zoom Controls -->
     <LinearLayout
         android:id="@+id/zoomControlsContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|top"
-        android:layout_margin="16dp"
+        android:layout_marginEnd="16dp"
         android:orientation="vertical"
-        android:background="@drawable/zoom_controls_background"
-        android:elevation="4dp">
+        app:layout_constraintBottom_toTopOf="@id/btnCollect"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/headerBar">
 
-        <ImageButton
-            android:id="@+id/btnZoomIn"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Zoom In"
-            android:src="@android:drawable/ic_input_add"
-            android:scaleType="centerInside"
-            android:padding="12dp" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/zoom_controls_background"
+            android:orientation="vertical">
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/neutral_dark"
-            android:alpha="0.3" />
+            <ImageButton
+                android:id="@+id/btnZoomIn"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Zoom In"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_input_add" />
 
-        <ImageButton
-            android:id="@+id/btnZoomOut"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_input_delete"
-            android:scaleType="centerInside"
-            android:padding="12dp"
-            app:tint="@color/primary" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:alpha="0.3"
+                android:background="@color/neutral_dark" />
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/neutral_dark"
-            android:alpha="0.3" />
+            <ImageButton
+                android:id="@+id/btnZoomOut"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_input_delete"
+                app:tint="@color/primary" />
 
-        <ImageButton
-            android:id="@+id/btnCenter"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Center Map"
-            android:src="@android:drawable/ic_menu_mylocation"
-            android:scaleType="centerInside"
-            android:padding="12dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/zoom_controls_background"
+            android:orientation="vertical"
+            android:layout_marginVertical="10dp">
+
+            <ImageButton
+                android:id="@+id/btnCenter"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Center Map"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_menu_mylocation" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/zoom_controls_background"
+            android:orientation="vertical">
+
+            <ImageButton
+                android:id="@+id/btnFitBounds"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Fit Bounds"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_fit_bounds" />
+        </LinearLayout>
+
+
+<!--        <ImageButton-->
+<!--            android:id="@+id/btnFitBounds"-->
+<!--            android:layout_width="40dp"-->
+<!--            android:layout_height="40dp"-->
+<!--            android:background="?attr/selectableItemBackgroundBorderless"-->
+<!--            android:contentDescription="Fit Bounds"-->
+<!--            android:padding="8dp"-->
+<!--            android:scaleType="centerInside"-->
+<!--            android:src="@drawable/ic_fit_bounds" />-->
     </LinearLayout>
 
-    <!-- Generate Points Button -->
+    <!-- T Icon with Height Panel (Bottom Right) -->
+    <LinearLayout
+        android:id="@+id/heightPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/left_panel_background"
+        android:elevation="4dp"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingVertical="5dp"
+        app:layout_constraintEnd_toEndOf="@id/leftControlPanel"
+        app:layout_constraintStart_toStartOf="@id/leftControlPanel"
+        app:layout_constraintTop_toBottomOf="@id/leftControlPanel">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="T"
+            android:textColor="@color/white"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvHeight"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text="1.80m"
+            android:textColor="@color/white"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- Collect Button (FAB) -->
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnGeneratePoints"
+        android:id="@+id/btnCollect"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center|bottom"
         android:layout_margin="16dp"
-        android:text="Generate Points"
+        android:layout_marginBottom="80dp"
+        android:drawableStart="@drawable/ic_add_white"
+        android:drawablePadding="8dp"
+        android:elevation="8dp"
+        android:paddingStart="20dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="12dp"
+        android:text="Collect"
         android:textColor="@color/white"
         app:backgroundTint="@color/primary"
-        android:elevation="4dp"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp" />
+        app:cornerRadius="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-</FrameLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
