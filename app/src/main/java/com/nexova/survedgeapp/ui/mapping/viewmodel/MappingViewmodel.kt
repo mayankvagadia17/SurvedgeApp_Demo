@@ -10,6 +10,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nexova.survedgeapp.data.model.SurveyCode
 import com.nexova.survedgeapp.data.model.SurveyLine
 import com.nexova.survedgeapp.data.model.SurveyPoint
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,9 @@ class MappingViewModel : ViewModel() {
     private val _lines = MutableLiveData<List<SurveyLine>>(emptyList())
     val lines: LiveData<List<SurveyLine>> = _lines
 
+    private val _codes = MutableLiveData<List<SurveyCode>>(emptyList())
+    val codes: LiveData<List<SurveyCode>> = _codes
+
     private val _isGeneratingPoints = MutableLiveData<Boolean>(false)
     val isGeneratingPoints: LiveData<Boolean> = _isGeneratingPoints
 
@@ -33,6 +37,13 @@ class MappingViewModel : ViewModel() {
 
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
+
+    init {
+        // Initialize with default NO-CODE
+        _codes.value = listOf(
+            SurveyCode("NO-CODE", "NO-CODE", SurveyCode.CodeType.POINT)
+        )
+    }
 
     /**
      * Generate dummy points similar to the screenshot
@@ -333,25 +344,42 @@ class MappingViewModel : ViewModel() {
                 android.util.Log.d("MappingViewModel", "No last known location available")
             }
 
-            // Request location updates
+            // Request location updates with maximum frequency for cm-level precision tracking
+            // Using the smallest possible values to get updates for even 1cm movements
             if (isGpsEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1000L, // Update every 1 second
-                    5f, // Update if moved 5 meters
+                    0L, // Update as fast as possible (0ms = minimum interval, typically ~100ms)
+                    0f, // Update on every movement, even cm-level changes (0f = no minimum distance)
                     locationListener!!
                 )
-                android.util.Log.d("MappingViewModel", "Requested GPS location updates")
+                android.util.Log.d("MappingViewModel", "Requested GPS location updates (maximum frequency for cm-level precision)")
+            }
+            
+            // Also request passive location updates for additional location sources
+            // This helps catch location updates from other apps that might have better precision
+            if (isGpsEnabled || isNetworkEnabled) {
+                try {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.PASSIVE_PROVIDER,
+                        0L,
+                        0f,
+                        locationListener!!
+                    )
+                    android.util.Log.d("MappingViewModel", "Requested Passive location updates")
+                } catch (e: Exception) {
+                    android.util.Log.d("MappingViewModel", "Passive provider not available: ${e.message}")
+                }
             }
             
             if (isNetworkEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    1000L, // Update every 1 second
-                    5f, // Update if moved 5 meters
+                    100L, // Network updates less frequently (100ms) as it's less precise
+                    0f, // Still update on every movement
                     locationListener!!
                 )
-                android.util.Log.d("MappingViewModel", "Requested Network location updates")
+                android.util.Log.d("MappingViewModel", "Requested Network location updates (100ms interval)")
             }
         } catch (e: SecurityException) {
             // Permission not granted
@@ -372,6 +400,167 @@ class MappingViewModel : ViewModel() {
         }
         locationListener = null
         locationManager = null
+    }
+
+    /**
+     * Add a new code
+     */
+    fun addCode(name: String, type: SurveyCode.CodeType) {
+        val currentCodes = _codes.value?.toMutableList() ?: mutableListOf()
+        val newCode = SurveyCode(
+            id = "C-${System.currentTimeMillis()}",
+            name = name.trim(),
+            type = type
+        )
+        currentCodes.add(newCode)
+        _codes.value = currentCodes
+    }
+
+    /**
+     * Get next available point ID
+     */
+    fun getNextPointId(): String {
+        val currentPoints = _points.value ?: emptyList()
+        val pointNumbers = currentPoints.mapNotNull { point ->
+            point.id.removePrefix("P").toIntOrNull()
+        }
+        val nextNumber = if (pointNumbers.isEmpty()) 1 else (pointNumbers.maxOrNull() ?: 0) + 1
+        return "P$nextNumber"
+    }
+
+    /**
+     * Check if point ID already exists
+     */
+    fun pointIdExists(pointId: String): Boolean {
+        return _points.value?.any { it.id == pointId } == true
+    }
+
+    /**
+     * Collect a point with measurement settings
+     * @param pointId Optional point ID (auto-generated if empty)
+     * @param codeId Code ID to assign
+     * @param fixOnly Whether to only collect when GPS fix is available
+     * @param averagingSeconds Total averaging time in seconds
+     * @param onProgress Callback for progress updates (0-100)
+     * @param onComplete Callback when measurement is complete with the created point
+     * @param onError Callback for errors
+     */
+    fun collectPoint(
+        pointId: String?,
+        codeId: String,
+        fixOnly: Boolean,
+        averagingSeconds: Int,
+        onProgress: (Int, String) -> Unit,
+        onComplete: (SurveyPoint) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val location = _currentLocation.value
+            if (location == null) {
+                onError("No GPS location available. Waiting for GPS fix...")
+                return@launch
+            }
+
+            // Check GPS fix if required
+            if (fixOnly) {
+                val accuracy = location.accuracy
+                if (accuracy == null || accuracy < 0 || accuracy >= 15) {
+                    onError("GPS fix is not available. Current accuracy: ${accuracy?.let { String.format("%.1f", it) } ?: "N/A"}m (need < 15m). Please wait for better signal or disable 'FIX only' option.")
+                    return@launch
+                }
+            }
+
+            val finalPointId = pointId?.trim()?.takeIf { it.isNotEmpty() } ?: getNextPointId()
+
+            // Check for duplicate ID
+            if (pointIdExists(finalPointId)) {
+                onError("A point with ID '$finalPointId' already exists.")
+                return@launch
+            }
+
+            // If no averaging needed, create point immediately
+            if (averagingSeconds <= 0) {
+                val point = SurveyPoint(
+                    id = finalPointId,
+                    name = finalPointId,
+                    code = _codes.value?.find { it.id == codeId }?.name ?: "NO-CODE",
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    elevation = if (location.hasAltitude()) location.altitude else null
+                )
+                addPoint(point)
+                onComplete(point)
+                return@launch
+            }
+
+            // Start averaging process
+            val readings = mutableListOf<Location>()
+            val startTime = System.currentTimeMillis()
+            val totalTimeMs = averagingSeconds * 1000L
+            val updateInterval = 200L // Update progress every 200ms
+            val readingInterval = 500L // Collect GPS reading every 500ms
+
+            var progressJob: kotlinx.coroutines.Job? = null
+            var readingJob: kotlinx.coroutines.Job? = null
+
+            // Progress update job
+            progressJob = launch {
+                while (true) {
+                    val elapsed = System.currentTimeMillis() - startTime
+                    val progress = ((elapsed.toFloat() / totalTimeMs) * 100).toInt().coerceIn(0, 100)
+                    val remainingSeconds = ((totalTimeMs - elapsed) / 1000).coerceAtLeast(0)
+                    val status = if (remainingSeconds > 0) {
+                        "Measuring... ${remainingSeconds}s remaining"
+                    } else {
+                        "Finalizing..."
+                    }
+                    onProgress(progress, status)
+                    if (elapsed >= totalTimeMs) break
+                    kotlinx.coroutines.delay(updateInterval)
+                }
+            }
+
+            // GPS reading collection job
+            readingJob = launch {
+                while (System.currentTimeMillis() - startTime < totalTimeMs) {
+                    val currentLocation = _currentLocation.value
+                    if (currentLocation != null) {
+                        // Check fix if required
+                        if (!fixOnly || (currentLocation.accuracy != null && currentLocation.accuracy >= 0 && currentLocation.accuracy < 15)) {
+                            readings.add(currentLocation)
+                        }
+                    }
+                    kotlinx.coroutines.delay(readingInterval)
+                }
+            }
+
+            // Wait for averaging to complete
+            progressJob.join()
+            readingJob.join()
+
+            if (readings.isEmpty()) {
+                onError("Could not collect GPS readings. Please try again.")
+                return@launch
+            }
+
+            // Calculate average coordinates
+            val avgLat = readings.map { it.latitude }.average()
+            val avgLon = readings.map { it.longitude }.average()
+            val avgAlt = readings.filter { it.hasAltitude() }.map { it.altitude }.average().takeIf { !it.isNaN() }
+
+            // Create point with averaged coordinates
+            val point = SurveyPoint(
+                id = finalPointId,
+                name = finalPointId,
+                code = _codes.value?.find { it.id == codeId }?.name ?: "NO-CODE",
+                latitude = avgLat,
+                longitude = avgLon,
+                elevation = avgAlt
+            )
+
+            addPoint(point)
+            onComplete(point)
+        }
     }
 
     override fun onCleared() {
