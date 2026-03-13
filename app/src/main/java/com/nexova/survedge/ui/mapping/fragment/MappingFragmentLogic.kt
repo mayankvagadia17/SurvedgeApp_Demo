@@ -659,7 +659,7 @@ class MappingFragmentLogic(
         }
     }
 
-    fun getNextLineCode(currentCodeId: String): String {
+    private fun nextLineCode(currentCodeId: String): String {
         // Extract the alpha part (base) to find the next sequence
         val (base, _) = normalizeLineCode(currentCodeId) ?: return currentCodeId
 
@@ -762,7 +762,7 @@ class MappingFragmentLogic(
             fragment.isCreatingNewLine = true
             fragment.newLinePoints.clear()
             fragment.newLineOverlay = null
-            fragment.newLineCodeId = getNextLineCode("L") // Default or next available
+            fragment.newLineCodeId = nextLineCode("L") // Default or next available
             fragment.isNewLineClosed = false
         }
 
@@ -2967,7 +2967,7 @@ class MappingFragmentLogic(
             val adapter = CodeAdapter(allCodes) { code ->
                 var finalId = code.abbreviation
                 if (code.indicatorType == IndicatorType.LINE) {
-                    finalId = getNextLineCode(finalId)
+                    finalId = nextLineCode(finalId)
                 }
                 onCodeSelected(finalId, code.indicatorType)
                 hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose)
@@ -5363,7 +5363,7 @@ class MappingFragmentLogic(
 
     fun advanceLineCodeForNewSegment(b: BottomSheetCollectPointBinding? = null) {
         if (isLineCodeFromCodeId(fragment.selectedPointCodeId)) {
-            fragment.selectedPointCodeId = getNextLineCode(fragment.selectedPointCodeId)
+            fragment.selectedPointCodeId = nextLineCode(fragment.selectedPointCodeId)
             b?.tvPointType?.text = fragment.selectedPointCodeId
         }
     }
