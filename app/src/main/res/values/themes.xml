@@ -1,0 +1,101 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Base.Theme.Survedge" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="android:fontFamily">@font/manrope_font_family</item>
+        <item name="fontFamily">@font/manrope_font_family</item>
+        <item name="textAppearanceBody1">@style/TextAppearance.Manrope.Body1</item>
+        <item name="textAppearanceBody2">@style/TextAppearance.Manrope.Body2</item>
+        <item name="textAppearanceButton">@style/TextAppearance.Manrope.Button</item>
+        <item name="textAppearanceCaption">@style/TextAppearance.Manrope.Caption</item>
+        <item name="textAppearanceHeadline1">@style/TextAppearance.Manrope.Headline1</item>
+        <item name="textAppearanceHeadline2">@style/TextAppearance.Manrope.Headline2</item>
+        <item name="textAppearanceHeadline3">@style/TextAppearance.Manrope.Headline3</item>
+        <item name="textAppearanceHeadline4">@style/TextAppearance.Manrope.Headline4</item>
+        <item name="textAppearanceHeadline5">@style/TextAppearance.Manrope.Headline5</item>
+        <item name="textAppearanceHeadline6">@style/TextAppearance.Manrope.Headline6</item>
+        <item name="textAppearanceOverline">@style/TextAppearance.Manrope.Overline</item>
+        <item name="textAppearanceSubtitle1">@style/TextAppearance.Manrope.Subtitle1</item>
+        <item name="textAppearanceSubtitle2">@style/TextAppearance.Manrope.Subtitle2</item>
+        
+        <!-- Transparent status bar and navigation bar -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        
+        <!-- Enable edge-to-edge layout -->
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        
+        <!-- Light status bar icons (for light backgrounds) -->
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.Survedge" parent="Base.Theme.Survedge" />
+
+    <style name="TextAppearance.Manrope.Body1" parent="TextAppearance.Material3.BodyLarge">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Body2" parent="TextAppearance.Material3.BodyMedium">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Button" parent="TextAppearance.Material3.LabelLarge">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Caption" parent="TextAppearance.Material3.BodySmall">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline1" parent="TextAppearance.Material3.DisplayLarge">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline2" parent="TextAppearance.Material3.DisplayMedium">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline3" parent="TextAppearance.Material3.DisplaySmall">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline4" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline5" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Headline6" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Overline" parent="TextAppearance.Material3.LabelSmall">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Subtitle1" parent="TextAppearance.Material3.TitleLarge">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+    <style name="TextAppearance.Manrope.Subtitle2" parent="TextAppearance.Material3.TitleMedium">
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+
+    <style name="OrangeButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_btn_square_orange</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="fontFamily">@font/manrope_font_family</item>
+    </style>
+
+    <style name="BottomNavTextActive" parent="TextAppearance.Material3.LabelMedium">
+        <item name="fontFamily">@font/manrope_semibold</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="BottomNavTextInactive" parent="TextAppearance.Material3.LabelMedium">
+        <item name="fontFamily">@font/manrope_regular</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+
+    <style name="BottomSheetDialogTheme" parent="Theme.Design.Light.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/BottomSheetStyle</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+
+    <style name="BottomSheetStyle" parent="Widget.Design.BottomSheet.Modal">
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+</resources>
