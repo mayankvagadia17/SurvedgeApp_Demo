@@ -19,5 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SurvedgeApp"
+rootProject.name = "Survedge"
 include(":app")
+ 
