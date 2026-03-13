@@ -249,7 +249,7 @@ class MappingFragmentLogic(
         fragment.collectedLabeledPoints.clear()
         fragment.collectedLabeledPoints.addAll(points)
 
-        // Determine next point ID based on the LAST collected point's type
+        // Determine prefix mode based on the LAST collected point's type
         val regex = Regex("^([a-zA-Z][a-zA-Z ]*)(\\d+)$")
         val numRegex = Regex("^\\d+$")
         val alphaOnlyRegex = Regex("^[a-zA-Z][a-zA-Z ]*$")
@@ -262,61 +262,23 @@ class MappingFragmentLogic(
                 prefixMatch != null -> {
                     val prefix = prefixMatch.groupValues[1]
                     fragment.pointIdPrefix = prefix
-                    // Find first gap in this prefix's numbers
-                    val usedPrefixNums = points.mapNotNull { pt ->
-                        val m2 = regex.find(pt.id)
-                        if (m2 != null && m2.groupValues[1] == prefix) m2.groupValues[2].toIntOrNull() else null
-                    }.toSet()
-                    var nextPrefixNum = (usedPrefixNums.minOrNull() ?: 1)
-                    while (nextPrefixNum in usedPrefixNums) nextPrefixNum++
-                    fragment.pointIdNumericCounter = nextPrefixNum
-                    // Also update numeric counter for fallback
-                    val usedNumericIds = points.mapNotNull { pt ->
-                        if (numRegex.matches(pt.id)) pt.id.toIntOrNull() else null
-                    }.toSet()
-                    if (usedNumericIds.isNotEmpty()) {
-                        var nextNumeric = (usedNumericIds.minOrNull() ?: 1)
-                        while (nextNumeric in usedNumericIds) nextNumeric++
-                        fragment.pointCounter = nextNumeric
-                    }
                 }
                 // Last point is pure alphabet like "A" -> continue with prefix numbering from 1
                 alphaOnlyRegex.matches(lastPoint.id) -> {
                     val prefix = lastPoint.id
                     fragment.pointIdPrefix = prefix
-                    var nextNum = 1
-                    while (points.any { it.id == "$prefix$nextNum" }) nextNum++
-                    fragment.pointIdNumericCounter = nextNum
-                    // Also update numeric counter for fallback
-                    val usedNumericIds = points.mapNotNull { pt ->
-                        if (numRegex.matches(pt.id)) pt.id.toIntOrNull() else null
-                    }.toSet()
-                    if (usedNumericIds.isNotEmpty()) {
-                        var nextNumeric = (usedNumericIds.minOrNull() ?: 1)
-                        while (nextNumeric in usedNumericIds) nextNumeric++
-                        fragment.pointCounter = nextNumeric
-                    }
                 }
                 // Last point is numeric like "13" -> continue numeric
                 numRegex.matches(lastPoint.id) -> {
                     fragment.pointIdPrefix = null
-                    fragment.pointIdNumericCounter = 1
-                    val usedNumericIds = points.mapNotNull { pt ->
-                        if (numRegex.matches(pt.id)) pt.id.toIntOrNull() else null
-                    }.toSet()
-                    var nextNumeric = (usedNumericIds.minOrNull() ?: 1)
-                    while (nextNumeric in usedNumericIds) nextNumeric++
-                    fragment.pointCounter = nextNumeric
                 }
                 // Fallback: unknown format
                 else -> {
-                    val maxNumeric = points.mapNotNull { pt ->
-                        if (numRegex.matches(pt.id)) pt.id.toIntOrNull() else null
-                    }.maxOrNull() ?: 0
-                    if (maxNumeric > 0) fragment.pointCounter = maxNumeric + 1
+                    fragment.pointIdPrefix = null
                 }
             }
         }
+        refreshNextPointIdForCollectSheet()
 
 
         // Optimized: Incremental Update instead of Clear + Recreate
@@ -1665,6 +1627,7 @@ class MappingFragmentLogic(
         updateMarkersForZoom()
         fragment.binding.mapView.invalidate()
         hideLineSegmentDetailsBottomSheet()
+        refreshNextPointIdForCollectSheet()
 
         Toast.makeText(fragment.requireContext(), "Line deleted", Toast.LENGTH_SHORT).show()
     }
@@ -1727,6 +1690,7 @@ class MappingFragmentLogic(
         updateMarkersForZoom()
         fragment.binding.mapView.invalidate()
         hideLineSegmentDetailsBottomSheet()
+        refreshNextPointIdForCollectSheet()
         Toast.makeText(fragment.requireContext(), "Point deleted", Toast.LENGTH_SHORT).show()
     }
 
@@ -2909,19 +2873,7 @@ class MappingFragmentLogic(
                         fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
                         fragment.currentLineCodeId = null
 
-                        val pointIdRegex = Regex("^([a-zA-Z])(\\d+)$")
-                        val numericOnlyRegex = Regex("^\\d+$")
-                        when {
-                            pointIdRegex.matches(removedPoint.id) -> {
-                                val matchResult = pointIdRegex.find(removedPoint.id)
-                                matchResult?.groupValues?.get(2)?.toIntOrNull() ?: 1
-                                if (fragment.pointIdNumericCounter > 1) fragment.pointIdNumericCounter--
-                            }
-
-                            numericOnlyRegex.matches(removedPoint.id) -> {
-                                if (fragment.pointCounter > 1) fragment.pointCounter--
-                            }
-                        }
+                        refreshNextPointIdForCollectSheet()
                         updateMarkersForZoom()
                         fragment.binding.mapView.invalidate()
                     }
@@ -6082,57 +6034,58 @@ class MappingFragmentLogic(
             regex.matches(pid) -> {
                 val m = regex.find(pid)
                 val prefix = m?.groupValues?.get(1) ?: ""
-                var nextNum = (m?.groupValues?.get(2)?.toIntOrNull() ?: 1) + 1
-
-                // Skip existing IDs
-                while (fragment.collectedLabeledPoints.any { it.id == "$prefix$nextNum" }) {
-                    nextNum++
-                }
-
                 fragment.pointIdPrefix = prefix
-                fragment.pointIdNumericCounter = nextNum
             }
 
             // Pure alphabet (e.g., "A", "B") -> start prefix numbering from 1
             Regex("^[a-zA-Z][a-zA-Z ]*$").matches(pid) -> {
                 val prefix = pid
-                var nextNum = 1
-
-                // Skip existing IDs (e.g., A1, A2 already exist -> suggest A3)
-                while (fragment.collectedLabeledPoints.any { it.id == "$prefix$nextNum" }) {
-                    nextNum++
-                }
-
                 fragment.pointIdPrefix = prefix
-                fragment.pointIdNumericCounter = nextNum
             }
 
             numRegex.matches(pid) -> {
-                var nextNum = (pid.toIntOrNull() ?: fragment.pointCounter) + 1
-
-                // Skip existing IDs
-                while (fragment.collectedLabeledPoints.any { it.id == "$nextNum" }) {
-                    nextNum++
-                }
-
-                fragment.pointCounter = nextNum
                 fragment.pointIdPrefix = null
-                fragment.pointIdNumericCounter = 1
             }
 
             else -> {
-                val n = pid.filter { it.isDigit() }.toIntOrNull()
-                var nextNum = if (n != null) n + 1 else fragment.pointCounter + 1
-
-                // Simple numeric skip attempt for fallback, though ID format is unknown
-                while (fragment.collectedLabeledPoints.any { it.id == "$nextNum" }) {
-                    nextNum++
-                }
-
-                if (n != null) fragment.pointCounter = nextNum
                 fragment.pointIdPrefix = null
-                fragment.pointIdNumericCounter = 1
             }
+        }
+        refreshNextPointIdForCollectSheet()
+    }
+
+    private fun computeNextNumericId(): Int {
+        val used = fragment.collectedLabeledPoints.mapNotNull {
+            if (it.id.all { ch -> ch.isDigit() }) it.id.toIntOrNull() else null
+        }.toSet()
+        var next = 1
+        while (next in used) next++
+        return next
+    }
+
+    private fun computeNextPrefixNum(prefix: String): Int {
+        val regex = Regex("^([a-zA-Z][a-zA-Z ]*)(\\d+)$")
+        val used = fragment.collectedLabeledPoints.mapNotNull {
+            val m = regex.find(it.id)
+            if (m != null && m.groupValues[1] == prefix) m.groupValues[2].toIntOrNull() else null
+        }.toSet()
+        var next = 1
+        while (next in used) next++
+        return next
+    }
+
+    private fun refreshNextPointIdForCollectSheet() {
+        if (fragment.pointIdPrefix != null) {
+            fragment.pointIdNumericCounter = computeNextPrefixNum(fragment.pointIdPrefix!!)
+        } else {
+            fragment.pointCounter = computeNextNumericId()
+        }
+        val sheet = fragment.binding.bottomSheetCollectPoint
+        if (sheet.root.visibility == View.VISIBLE) {
+            val nextId =
+                if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString()
+            sheet.etPointId.setText(nextId)
+            sheet.etPointId.setHint(nextId)
         }
     }
 
