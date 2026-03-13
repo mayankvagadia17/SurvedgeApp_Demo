@@ -2193,11 +2193,12 @@ class MappingFragmentLogic(
             sheetBinding.llOptionPoint.setOnClickListener {
                 sheetBinding.cvAddOptions.visibility = View.GONE
                 sheetBinding.viewOutsideTouch.visibility = View.GONE
-                hideObjectListBottomSheet(showNav = false) {
-                    fragment.selectedPointCodeId = "P"
-                    fragment.selectedPointIndicatorType = IndicatorType.POINT
-                    showNewPointBottomSheet(null)
-                }
+
+                fragment.selectedPointCodeId = "P"
+                fragment.selectedPointIndicatorType = IndicatorType.POINT
+
+                // Slide new point sheet up above object list (keep object list visible underneath)
+                showNewPointBottomSheet(null)
             }
 
             sheetBinding.llOptionLine.setOnClickListener {
@@ -2298,6 +2299,71 @@ class MappingFragmentLogic(
             animateSheetTransition(null, sheetBinding.root, transition)
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
             setupSwipeToDismiss(sheetBinding.root) { hideObjectListBottomSheet() }
+        }
+    }
+
+    private fun updateObjectListIfVisible() {
+        val sheetBinding = fragment.binding.bottomSheetObjectList
+        if (sheetBinding.root.visibility != View.VISIBLE) return
+
+        val allItems = processCollectedPointsForObjectList()
+        val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
+            allItems.filter { it.indicatorType == IndicatorType.POINT }
+        } else {
+            allItems
+        }
+
+        val handleItemAction = { item: ObjectListItem ->
+            if (fragment.isCreatingNewLine && item.indicatorType == IndicatorType.POINT) {
+                hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
+                val point = fragment.collectedLabeledPoints.find { it.id == item.id }
+                if (point != null) {
+                    addPointToNewLine(point)
+                }
+            } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
+                hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
+                val point = fragment.collectedLabeledPoints.find { it.id == item.id }
+                if (point != null && fragment.pendingEditLineSegment != null) {
+                    addExistingPointToLineSegment(point, fragment.pendingEditLineSegment!!)
+                    showEditLineBottomSheet(fragment.pendingEditLineSegment!!, transition = BottomSheetTransition.SLIDE_IN_LEFT, isRestoring = true)
+                }
+            } else {
+                hideObjectListBottomSheet(showNav = false) {
+                    if (item.indicatorType == IndicatorType.POINT) {
+                        fragment.collectedLabeledPoints.find { it.id == item.id }
+                            ?.let {
+                                animateToLocationWithZoom(
+                                    it.geoPoint,
+                                    fragment.binding.mapView.zoomLevelDouble.coerceAtLeast(18.0)
+                                )
+                                showPointDetailsBottomSheet(it)
+                            }
+                    } else {
+                        fragment.completedLineOverlays.find { (it as? ClickablePolylineOverlay)?.codeId == item.codeId }
+                            ?.let {
+                                val ls = it as ClickablePolylineOverlay
+                                zoomToLine(ls)
+                                handleLineSegmentClick(ls)
+                            }
+                    }
+                }
+            }
+            Unit
+        }
+
+        val query = sheetBinding.etSearchObject.text?.toString()?.lowercase() ?: ""
+        val filtered = if (query.isEmpty()) {
+            items
+        } else {
+            items.filter { it.id.lowercase().contains(query) || it.codeId.lowercase().contains(query) }
+        }
+        val adapter = sheetBinding.rvObjectList.adapter as? ObjectListAdapter
+        if (adapter != null) {
+            adapter.updateItems(filtered)
+        } else {
+            sheetBinding.rvObjectList.layoutManager = LinearLayoutManager(fragment.requireContext())
+            sheetBinding.rvObjectList.adapter =
+                ObjectListAdapter(objects = filtered, onItemClick = handleItemAction)
         }
     }
 
@@ -5787,12 +5853,15 @@ class MappingFragmentLogic(
 
     fun showNewPointBottomSheet(
         lineSegment: ClickablePolylineOverlay?,
-        transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP
+        transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
+        animate: Boolean = true
     ) {
         val sheetBinding = fragment.binding.bottomSheetNewPoint
         hideBottomNavigation {
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            // Ensure New Point sheet is above any other visible sheet
+            sheetBinding.root.elevation = 30f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 30f * fragment.resources.displayMetrics.density
+            sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
 
@@ -5871,7 +5940,9 @@ class MappingFragmentLogic(
             fragment.binding.mapView.setOnTouchListener { _, _ -> true }
             fragment.binding.llMapsButtons.visibility = View.GONE
             
-            animateSheetTransition(null, sheetBinding.root, transition)
+            if (animate) {
+                animateSheetTransition(null, sheetBinding.root, transition)
+            }
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
             setupSwipeToDismiss(sheetBinding.root) { hideNewPointBottomSheet() }
         }
@@ -5891,6 +5962,7 @@ class MappingFragmentLogic(
         
         animateSheetTransition(root, null, transition) {
             restoreStateAfterClosingInfoSheet()
+            updateObjectListIfVisible()
             onHidden?.invoke()
         }
     }
