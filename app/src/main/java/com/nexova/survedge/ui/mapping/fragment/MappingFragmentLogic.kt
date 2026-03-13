@@ -5479,12 +5479,24 @@ class MappingFragmentLogic(
                 super.onSelectedChanged(viewHolder, actionState)
                 if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
                     fragment.isDraggingEditLinePoint = true
+                    viewHolder?.itemView?.let { v ->
+                        v.animate().cancel()
+                        v.elevation = 24f * fragment.resources.displayMetrics.density
+                        v.translationZ = 24f * fragment.resources.displayMetrics.density
+                        v.setBackgroundResource(R.drawable.bg_edit_point_item)
+                    }
                 }
             }
 
             override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
                 super.clearView(recyclerView, viewHolder)
                 fragment.isDraggingEditLinePoint = false
+                viewHolder.itemView.let { v ->
+                    v.animate().cancel()
+                    v.elevation = 0f
+                    v.translationZ = 0f
+                    v.setBackgroundResource(R.drawable.bg_edit_point_item)
+                }
             }
 
             override fun onMove(
