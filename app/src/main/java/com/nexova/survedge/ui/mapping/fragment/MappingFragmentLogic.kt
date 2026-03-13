@@ -824,25 +824,27 @@ class MappingFragmentLogic(
 
             // Code selection click listener (matches edit line behavior)
             sheetBinding.llCodeValue.setOnClickListener {
-                hideNewLineBottomSheet(transition = BottomSheetTransition.SLIDE_DOWN) {
-                    showSelectCodeBottomSheet(null, onlyPoints = false, onlyLines = true, transition = BottomSheetTransition.SLIDE_UP) { codeId, indicatorType ->
-                        if (indicatorType != IndicatorType.LINE) {
-                            showNewLineBottomSheet(isRestoring = true, transition = BottomSheetTransition.SLIDE_UP)
-                            return@showSelectCodeBottomSheet
-                        }
-                        
-                        fragment.newLineCodeId = codeId
-                        
-                        // Reopen new line sheet with updated code
-                        showNewLineBottomSheet(isRestoring = true, transition = BottomSheetTransition.SLIDE_UP)
+                // Keep new line sheet visible underneath; show select code above it
+                showSelectCodeBottomSheet(
+                    null,
+                    onlyPoints = false,
+                    onlyLines = true,
+                    transition = BottomSheetTransition.SLIDE_UP,
+                    showNavOnCloseOverride = false
+                ) { codeId, indicatorType ->
+                    if (indicatorType != IndicatorType.LINE) {
+                        return@showSelectCodeBottomSheet
                     }
+                    fragment.newLineCodeId = codeId
+                    sheetBinding.tvCodeId.text = fragment.newLineCodeId
+                    updateNewLineUI()
                 }
             }
 
-            sheetBinding.tvAddPointFromList.setOnClickListener {
-                hideNewLineBottomSheet(transition = BottomSheetTransition.SLIDE_OUT_LEFT)
-                showObjectListBottomSheetInternalForNewLine(BottomSheetTransition.SLIDE_IN_RIGHT)
-            }
+        sheetBinding.tvAddPointFromList.setOnClickListener {
+            // Keep new line sheet visible underneath; show object list above it
+            showObjectListBottomSheetInternalForNewLine(BottomSheetTransition.SLIDE_UP)
+        }
 
             sheetBinding.btnSaveLine.setOnClickListener {
                 saveNewLine()
@@ -893,7 +895,7 @@ class MappingFragmentLogic(
     }
 
     fun showObjectListBottomSheetInternalForNewLine(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
-        showObjectListBottomSheet(transition = transition)
+        showObjectListBottomSheet(transition = transition, showAddButton = false)
     }
 
     fun hideNewLineBottomSheet(
@@ -2165,14 +2167,22 @@ class MappingFragmentLogic(
     }
 
 
-    fun showObjectListBottomSheet(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
+    fun showObjectListBottomSheet(
+        transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
+        showAddButton: Boolean = true
+    ) {
         val sheetBinding = fragment.binding.bottomSheetObjectList
         hideBottomNavigation {
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            // Ensure object list is above other sheets (e.g., edit line)
+            sheetBinding.root.elevation = 30f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 30f * fragment.resources.displayMetrics.density
             sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
+
+            // Control Add button visibility based on context
+            sheetBinding.btnAddObject.visibility = if (showAddButton) View.VISIBLE else View.INVISIBLE
+            sheetBinding.btnAddObject.alpha = if (showAddButton) 1f else 0f
 
             sheetBinding.cvAddOptions.visibility = View.GONE
             sheetBinding.viewOutsideTouch.visibility = View.GONE
@@ -2227,7 +2237,6 @@ class MappingFragmentLogic(
                     if (point != null) {
                         addPointToNewLine(point)
                     }
-                    showNewLineBottomSheet(transition = BottomSheetTransition.SLIDE_IN_LEFT, isRestoring = true)
                 } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
                     val point = fragment.collectedLabeledPoints.find { it.id == item.id }
                     if (point != null && fragment.pendingEditLineSegment != null) {
@@ -5561,7 +5570,7 @@ class MappingFragmentLogic(
             fragment.isSelectingPointForEditLine = true
             fragment.pendingEditLineSegment = ls
             // Keep edit line sheet visible underneath; slide object list above it
-            showObjectListBottomSheet(transition = BottomSheetTransition.SLIDE_UP)
+            showObjectListBottomSheet(transition = BottomSheetTransition.SLIDE_UP, showAddButton = false)
         }
 
         sheetBinding.llCodeValue.setOnClickListener {
