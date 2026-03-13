@@ -2169,6 +2169,7 @@ class MappingFragmentLogic(
         hideBottomNavigation {
             sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
             sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
 
@@ -2231,7 +2232,6 @@ class MappingFragmentLogic(
                     if (point != null && fragment.pendingEditLineSegment != null) {
                         hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
                         addExistingPointToLineSegment(point, fragment.pendingEditLineSegment!!)
-                        showEditLineBottomSheet(fragment.pendingEditLineSegment!!, transition = BottomSheetTransition.SLIDE_IN_LEFT, isRestoring = true)
                     }
                     fragment.isSelectingPointForEditLine = false
                 } else {
@@ -2384,7 +2384,28 @@ class MappingFragmentLogic(
         adjustMapsButtonsForBottomSheet(closingView = sheetBinding.root)
         
         animateSheetTransition(sheetBinding.root, null, transition) {
-            if (showNav) restoreStateAfterClosingInfoSheet()
+            if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE) {
+                restoreStateAfterClosingInfoSheet()
+            }
+            // If edit line is open underneath, refresh its list/counts after closing object list
+            if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE) {
+                val ls = fragment.pendingEditLineSegment
+                val b = fragment.currentEditLineBinding
+                val adapter = fragment.currentEditLineAdapter
+                if (ls != null && b != null && adapter != null) {
+                    adapter.updatePoints(ls.labeledPoints.toMutableList())
+                    val count = ls.labeledPoints.size
+                    b.tvPointsCount.text = "${count} ${if (count == 1) "Point" else "Points"}"
+                    val canClose = count >= 3
+                    b.cbClosedLine.isEnabled = canClose
+                    val colorRes = if (canClose) R.color.text_primary else R.color.neutral_dark
+                    b.tvClosedLineLabel.setTextColor(
+                        ContextCompat.getColor(fragment.requireContext(), colorRes)
+                    )
+                    if (!canClose && b.cbClosedLine.isChecked) b.cbClosedLine.isChecked = false
+                    updateEditLineOverlay()
+                }
+            }
             onHidden?.invoke()
         }
     }
@@ -2954,6 +2975,7 @@ class MappingFragmentLogic(
         onlyPoints: Boolean = false,
         onlyLines: Boolean = false,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
+        showNavOnCloseOverride: Boolean? = null,
         onCodeSelected: (String, IndicatorType) -> Unit
     ) {
         val sheetBinding = fragment.binding.bottomSheetSelectCode
@@ -2961,11 +2983,12 @@ class MappingFragmentLogic(
         sheetBinding.vfCodeManager.inAnimation = null
         sheetBinding.vfCodeManager.outAnimation = null
         sheetBinding.vfCodeManager.displayedChild = 0
-        val shouldShowNavOnClose = collectSheetBinding == null
+        val shouldShowNavOnClose = showNavOnCloseOverride ?: (collectSheetBinding == null)
 
         hideBottomNavigation {
             sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
             sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
             val defaultCodes = listOf(
@@ -5524,34 +5547,42 @@ class MappingFragmentLogic(
         sheetBinding.tvAddPoint.setOnClickListener {
             fragment.isSelectingPointForEditLine = true
             fragment.pendingEditLineSegment = ls
-            hideEditLineBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_LEFT)
-            showObjectListBottomSheet(transition = BottomSheetTransition.SLIDE_IN_RIGHT)
+            // Keep edit line sheet visible underneath; slide object list above it
+            showObjectListBottomSheet(transition = BottomSheetTransition.SLIDE_UP)
         }
 
         sheetBinding.llCodeValue.setOnClickListener {
             isEditLineSaved = true // Prevent revert when hiding to change code
-            hideEditLineBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_DOWN) {
-                showSelectCodeBottomSheet(null, onlyPoints = false, onlyLines = true, transition = BottomSheetTransition.SLIDE_UP) { codeId, indicatorType ->
-                    if (indicatorType != IndicatorType.LINE) {
-                        // Only line codes are valid here
-                        showEditLineBottomSheet(ls, isRestoring = true, transition = BottomSheetTransition.SLIDE_UP)
-                        return@showSelectCodeBottomSheet
-                    }
-                    // Update the overlay's code ID
-                    val oldCodeId = ls.codeId
-                    ls.codeId = codeId
-                    ls.featureCode = codeId.filter { it.isLetter() }.ifEmpty { "L" }
-
-                    // Update all associated points in local list
-                    fragment.collectedLabeledPoints.forEachIndexed { index, point ->
-                        if (point.codeId == oldCodeId) {
-                            fragment.collectedLabeledPoints[index] = point.copy(codeId = codeId)
-                        }
-                    }
-
-                    // Reopen edit line sheet with updated data
-                    showEditLineBottomSheet(ls, isRestoring = true, transition = BottomSheetTransition.SLIDE_UP)
+            // Keep edit line visible underneath; show select code above it
+            showSelectCodeBottomSheet(
+                null,
+                onlyPoints = false,
+                onlyLines = true,
+                transition = BottomSheetTransition.SLIDE_UP,
+                showNavOnCloseOverride = false
+            ) { codeId, indicatorType ->
+                if (indicatorType != IndicatorType.LINE) {
+                    // Only line codes are valid here
+                    return@showSelectCodeBottomSheet
                 }
+                // Update the overlay's code ID
+                val oldCodeId = ls.codeId
+                ls.codeId = codeId
+                ls.featureCode = codeId.filter { it.isLetter() }.ifEmpty { "L" }
+
+                // Update all associated points in local list
+                fragment.collectedLabeledPoints.forEachIndexed { index, point ->
+                    if (point.codeId == oldCodeId) {
+                        fragment.collectedLabeledPoints[index] = point.copy(codeId = codeId)
+                    }
+                }
+
+                // Update edit line UI if visible
+                fragment.currentEditLineBinding?.let { b ->
+                    b.tvCodeId.text = ls.codeId.ifEmpty { "" }
+                    b.tvCodeDescription.text = getCodeDescription(ls.codeId).ifEmpty { "No code" }
+                }
+                updateEditLineOverlay()
             }
         }
 
@@ -5700,8 +5731,15 @@ class MappingFragmentLogic(
             // Deselect logic handles unhighlighting, but we ensure original is clean
             ls.unhighlight()
 
-            // If we arrived here from Line Segment sheet, go back to it.
-            if (!popBackStack()) hideEditLineBottomSheet()
+            // Explicit close should exit selection mode to avoid reopening
+            fragment.isSelectingPointForEditLine = false
+
+            // Ensure original line is visible before closing to avoid blink
+            ls.isEnabled = true
+
+            // Close edit line explicitly (do not reopen via back stack)
+            clearBackStack()
+            hideEditLineBottomSheet()
         }
         sheetBinding.root.visibility = View.VISIBLE
         sheetBinding.root.bringToFront() // Ensure it's on top
