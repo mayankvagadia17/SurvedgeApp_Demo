@@ -208,7 +208,14 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
             fragment.logic.adjustMapsButtonsForBottomSheet()
             // Restore the main Collect FAB
             fragment.binding.btnCollect.visibility = View.VISIBLE
-            if (showNav) {
+            val restoreLine = fragment.restoreLineSegmentAfterStakeout
+            fragment.restoreLineSegmentAfterStakeout = null
+            if (restoreLine != null) {
+                fragment.logic.showLineSegmentDetailsBottomSheet(
+                    restoreLine,
+                    MappingFragmentLogic.BottomSheetTransition.SLIDE_UP
+                )
+            } else if (showNav) {
                 fragment.logic.restoreStateAfterClosingInfoSheet()
             } else {
                 // Transitioning to an info sheet, hide visuals

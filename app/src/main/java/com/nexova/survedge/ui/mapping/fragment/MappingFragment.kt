@@ -78,6 +78,7 @@ class MappingFragment : Fragment() {
     internal var closingSegmentOverlay: ClickablePolylineOverlay? = null
     internal var isSelectingPointForEditLine: Boolean = false
     internal var pendingEditLineSegment: ClickablePolylineOverlay? = null
+    internal var restoreLineSegmentAfterStakeout: ClickablePolylineOverlay? = null
     internal val lineCodeSequenceCounters = mutableMapOf<String, Int>()
     internal var currentEditLineAdapter: EditPointAdapter? = null
     internal var currentEditLineBinding: BottomSheetEditLineBinding? = null

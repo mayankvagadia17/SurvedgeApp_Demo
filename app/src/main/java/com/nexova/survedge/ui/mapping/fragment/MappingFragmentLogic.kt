@@ -2010,6 +2010,7 @@ class MappingFragmentLogic(
             fragment.selectedPoint = null
             updateMarkersForZoom()
 
+            fragment.restoreLineSegmentAfterStakeout = lineSegment
             hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
             startStakeoutSession(points)
         }
