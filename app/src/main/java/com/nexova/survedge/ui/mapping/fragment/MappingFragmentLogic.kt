@@ -5369,8 +5369,7 @@ class MappingFragmentLogic(
                 val point = fragment.selectedPoint
                 if (point != null) {
                     hide() // Hide menu
-                    // Hide details sheet but keep selection and don't show nav (since edit sheet will show)
-                    hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
+                    // Keep line segment sheet visible; show edit point sheet above it
                     showEditPointBottomSheet(point)
                 }
             }
@@ -6391,14 +6390,24 @@ class MappingFragmentLogic(
         point: LabeledPoint,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP
     ) {
-        hideBottomNavigation {
-            val sheetBinding = fragment.binding.bottomSheetEditPoint
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+        // Hide bottom navigation immediately (no animation) for edit point
+        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+            animate().cancel()
+            visibility = View.GONE
+            alpha = 1f
+            translationY = 0f
+        }
 
-            // Reset height to WRAP_CONTENT (like collect point bottom sheet)
-            sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
-            sheetBinding.root.requestLayout()
+        (fragment.activity as? MainActivity)?.setNavHiddenState(true)
+        val sheetBinding = fragment.binding.bottomSheetEditPoint
+        sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
+        sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+        sheetBinding.root.bringToFront()
+        sheetBinding.root.updateLayoutParams<ConstraintLayout.LayoutParams> { bottomMargin = 0 }
+
+        // Full height like New Point sheet
+        applyFullScreenConstraints(sheetBinding.root)
+        sheetBinding.root.requestLayout()
 
             sheetBinding.etPointId.setText(point.id)
             sheetBinding.etPointId.setHint(point.id)
@@ -6457,9 +6466,9 @@ class MappingFragmentLogic(
                 hideEditPointBottomSheet()
             }
 
-            sheetBinding.root.visibility = View.VISIBLE
-            animateSheetTransition(null, sheetBinding.root, transition)
-            adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
+        sheetBinding.root.visibility = View.VISIBLE
+        animateSheetTransition(null, sheetBinding.root, transition)
+        adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
 
             // Keyboard Handling: Expand to full screen when keyboard shows (same as collect point)
             sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
@@ -6519,13 +6528,21 @@ class MappingFragmentLogic(
                 }
             })
 
-            setupSwipeToDismiss(sheetBinding.root) { hideEditPointBottomSheet() }
-        }
+        setupSwipeToDismiss(sheetBinding.root) { hideEditPointBottomSheet() }
     }
 
     fun hideEditPointBottomSheet(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN) {
         val root = fragment.binding.bottomSheetEditPoint.root
         hideKeyboard(root)
+
+        // Show bottom navigation immediately (no animation) before sliding down
+        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+            animate().cancel()
+            visibility = View.VISIBLE
+            alpha = 1f
+            translationY = 0f
+        }
+        (fragment.activity as? MainActivity)?.setNavHiddenState(false)
 
         animateSheetTransition(root, null, transition) {
             // Re-enable map touch and show map buttons
@@ -6536,7 +6553,9 @@ class MappingFragmentLogic(
             fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
             adjustMapsButtonsForBottomSheet(closingView = root)
-            fragment.selectedPoint = null
+            if (fragment.binding.bottomSheetLineSegment.root.visibility != View.VISIBLE) {
+                fragment.selectedPoint = null
+            }
             updateMarkersForZoom(forceRefresh = true)
             fragment.binding.mapView.invalidate()
             restoreStateAfterClosingInfoSheet()
