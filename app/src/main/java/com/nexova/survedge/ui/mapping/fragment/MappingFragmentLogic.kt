@@ -698,14 +698,20 @@ class MappingFragmentLogic(
             showNewLineBottomSheet(transition = transition)
         }
     }
-
-    private fun applyFullScreenConstraints(view: View) {
+    private fun applyFullScreenConstraints(view: View, isRootView: Boolean = false) {
         val params = view.layoutParams as ConstraintLayout.LayoutParams
-        params.height = 0 // MATCH_CONSTRAINT
+        
+        if (params.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
+            params.height = 0
+            params.verticalBias = 0.5f // Default
+            params.constrainedHeight = false
+        } else {
+            // For wrap_content sheets, anchor them to the bottom but constrain their top
+            params.verticalBias = 1.0f
+            params.constrainedHeight = true
+        }
+        
         params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
-        // For full screen, we want it to cover EVERYTHING, including the bottom navigation bar
-        // Clear bottom margin and pin strictly to parent bottom
-        params.bottomMargin = 0
         params.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
@@ -850,6 +856,7 @@ class MappingFragmentLogic(
 
 
             sheetBinding.root.visibility = View.VISIBLE
+            applyFullScreenConstraints(sheetBinding.root)
             animateSheetTransition(null, sheetBinding.root, transition)
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
             setupSwipeToDismiss(sheetBinding.root) { hideNewLineBottomSheet() }
@@ -5562,6 +5569,7 @@ class MappingFragmentLogic(
         }
 
         sheetBinding.root.visibility = View.VISIBLE
+        applyFullScreenConstraints(sheetBinding.root)
         animateSheetTransition(null, sheetBinding.root, transition)
         setupSwipeToDismiss(sheetBinding.root) { hideEditLineBottomSheet() }
 
