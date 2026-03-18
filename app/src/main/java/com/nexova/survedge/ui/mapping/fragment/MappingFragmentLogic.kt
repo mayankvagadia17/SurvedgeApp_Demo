@@ -2948,8 +2948,8 @@ class MappingFragmentLogic(
         val shouldShowNavOnClose = showNavOnCloseOverride ?: (collectSheetBinding == null)
 
         hideBottomNavigation {
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 40f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 40f * fragment.resources.displayMetrics.density
             sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
@@ -3055,11 +3055,7 @@ class MappingFragmentLogic(
 
                 sheetBinding.btnCloseAddCode.setOnClickListener {
                     hideKeyboard(sheetBinding.root)
-                    sheetBinding.vfCodeManager.setInAnimation(fragment.requireContext(), R.anim.slide_in_left)
-                    sheetBinding.vfCodeManager.setOutAnimation(fragment.requireContext(), R.anim.slide_out_right)
-                    sheetBinding.vfCodeManager.showPrevious()
-                    sheetBinding.vfCodeManager.setInAnimation(fragment.requireContext(), R.anim.slide_in_right)
-                    sheetBinding.vfCodeManager.setOutAnimation(fragment.requireContext(), R.anim.slide_out_left)
+                    hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose)
                 }
 
                 sheetBinding.vfCodeManager.setInAnimation(fragment.requireContext(), R.anim.slide_in_right)
@@ -3087,6 +3083,11 @@ class MappingFragmentLogic(
         fragment.binding.mapView.setMultiTouchControls(true)
         fragment.binding.mapView.setOnTouchListener(null)
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
+
+        // Clear horizontal animations to avoid slide issues during hide
+        val vf = fragment.binding.bottomSheetSelectCode.vfCodeManager
+        vf.inAnimation = null
+        vf.outAnimation = null
 
         animateSheetTransition(fragment.binding.bottomSheetSelectCode.root, null, transition) {
             if (showNav) {
@@ -5896,13 +5897,11 @@ class MappingFragmentLogic(
             }
 
             sheetBinding.llPointTypeSelector.setOnClickListener {
-                hideNewPointBottomSheet() {
-                    showSelectCodeBottomSheet(null, onlyPoints = true) { code, type ->
-                        fragment.selectedPointCodeId = code; fragment.selectedPointIndicatorType = type
-                        sheetBinding.tvPointType.text =
-                            code; updatePointTypeIndicator(sheetBinding.viewTypeDot, type)
-                        showNewPointBottomSheet(lineSegment)
-                    }
+                showSelectCodeBottomSheet(null, onlyPoints = true, showNavOnCloseOverride = false) { code, type ->
+                    fragment.selectedPointCodeId = code
+                    fragment.selectedPointIndicatorType = type
+                    sheetBinding.tvPointType.text = code
+                    updatePointTypeIndicator(sheetBinding.viewTypeDot, type)
                 }
             }
             sheetBinding.btnCloseNewPoint.setOnClickListener { hideNewPointBottomSheet() }
