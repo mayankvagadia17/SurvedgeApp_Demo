@@ -142,7 +142,7 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         }
     }
 
-    fun showStakeoutUI() {
+    fun showStakeoutUI() = fragment.logic.hideMenu {
         fragment.logic.hideBottomNavigation {
             val root = fragment.binding.stakeoutBottomSheet.root
             root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -202,9 +202,10 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         }
     }
 
-    fun hideStakeoutUI(showNav: Boolean = true) {
+    fun hideStakeoutUI(showNav: Boolean = true, onHidden: (() -> Unit)? = null) {
         val root = fragment.binding.stakeoutBottomSheet.root
         fragment.logic.animateSheetTransition(root, null, MappingFragmentLogic.BottomSheetTransition.SLIDE_DOWN) {
+            onHidden?.invoke()
             fragment.logic.adjustMapsButtonsForBottomSheet()
             // Restore the main Collect FAB
             fragment.binding.btnCollect.visibility = View.VISIBLE
