@@ -376,41 +376,18 @@ class MappingFragmentBackup : Fragment() {
 
     private fun hideBottomNavigation() {
         (activity as? com.nexova.survedge.ui.main.activity.MainActivity)?.binding?.bottomNavigationView?.let { bottomNav ->
-            // Cancel any ongoing animations
             bottomNav.animate().cancel()
-
-            // Save current padding
-            val currentPaddingBottom = bottomNav.paddingBottom
-
-            // Immediately hide without state checks
-            bottomNav.visibility = View.VISIBLE // Ensure it's visible first so animation works
-            bottomNav.animate()
-                .translationY(bottomNav.height.toFloat())
-                .alpha(0f)
-                .setDuration(300)
-                .withEndAction {
-                    bottomNav.visibility = View.GONE
-                    // Restore padding after animation
-                    bottomNav.setPadding(0, 0, 0, currentPaddingBottom)
-                }
-                .start()
+            bottomNav.translationY = 0f
+            bottomNav.visibility = View.GONE
         }
     }
 
     private fun showBottomNavigation() {
         (activity as? com.nexova.survedge.ui.main.activity.MainActivity)?.binding?.bottomNavigationView?.let { bottomNav ->
             if (bottomNav.visibility != View.VISIBLE) {
-                val currentPaddingBottom = bottomNav.paddingBottom
+                bottomNav.animate().cancel()
+                bottomNav.translationY = 0f
                 bottomNav.visibility = View.VISIBLE
-                bottomNav.animate()
-                    .translationY(0f)
-                    .alpha(1f)
-                    .setDuration(300)
-                    .withEndAction {
-                        // Ensure padding is preserved after animation
-                        bottomNav.setPadding(0, 0, 0, currentPaddingBottom)
-                    }
-                    .start()
             }
         }
     }

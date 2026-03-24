@@ -4054,17 +4054,9 @@ class MappingFragmentLogic(
                 return@let
             }
             nav.animate().cancel()
-            val duration = 50L
-            val interpolator = FastOutSlowInInterpolator()
-
-            nav.animate()
-                .translationY(nav.height.toFloat())
-                .setInterpolator(interpolator)
-                .setDuration(duration)
-                .withEndAction {
-                    nav.visibility = View.GONE
-                    onEnd?.invoke()
-                }.start()
+            nav.translationY = 0f
+            nav.visibility = View.GONE
+            onEnd?.invoke()
 
         } ?: onEnd?.invoke()
     }
@@ -4076,31 +4068,15 @@ class MappingFragmentLogic(
 
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.let { nav ->
             if (nav.visibility != View.VISIBLE) {
-                val duration = 50L
-                val interpolator = FastOutSlowInInterpolator()
-
+                nav.animate().cancel()
                 nav.visibility = View.VISIBLE
-                if (nav.translationY == 0f) nav.translationY = nav.height.toFloat()
+                nav.translationY = 0f
 
-                nav.animate()
-                    .translationY(0f)
-                    .setInterpolator(interpolator)
-                    .setDuration(duration)
-                    .start()
+                fragment.binding.btnCollect.animate().cancel()
+                fragment.binding.btnCollect.translationY = -bottomNavOffset
 
-                // Animate buttons UP to clear the nav bar
-                fragment.binding.btnCollect.animate()
-                    .translationY(-bottomNavOffset)
-                    .setInterpolator(interpolator)
-                    .setDuration(duration)
-                    .start()
-
-                // Animate llMapsButtons UP to its resting position
-                fragment.binding.llMapsButtons.animate()
-                    .translationY(0f)
-                    .setInterpolator(interpolator)
-                    .setDuration(duration)
-                    .start()
+                fragment.binding.llMapsButtons.animate().cancel()
+                fragment.binding.llMapsButtons.translationY = 0f
 
                 // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin
                 if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
