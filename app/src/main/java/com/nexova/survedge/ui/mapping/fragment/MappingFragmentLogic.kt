@@ -107,6 +107,8 @@ class MappingFragmentLogic(
 
     // State for Edit Line Reversion
     private var originalEditLineState: List<LabeledPoint>? = null
+    private var originalEditLineCodeId: String? = null
+    private var originalEditLineFeatureCode: String? = null
     private var isEditLineSaved = false
     private var selectCodeSearchWatcher: TextWatcher? = null
 
@@ -2378,8 +2380,11 @@ class MappingFragmentLogic(
                 val b = fragment.currentEditLineBinding
                 val adapter = fragment.currentEditLineAdapter
                 if (ls != null && b != null && adapter != null) {
-                    adapter.updatePoints(ls.labeledPoints.toMutableList())
-                    val count = ls.labeledPoints.size
+                    val currentPoints = adapter.getPoints()
+                    // Keep pending line synced to current unsaved edit state while edit sheet is open.
+                    ls.labeledPoints = currentPoints.toList()
+
+                    val count = currentPoints.size
                     b.tvPointsCount.text = "${count} ${if (count == 1) "Point" else "Points"}"
                     val canClose = count >= 3
                     b.cbClosedLine.isEnabled = canClose
@@ -5441,7 +5446,10 @@ class MappingFragmentLogic(
         )
 
         fragment.pendingEditLineSegment = ls
-        ls.isEnabled = false // Hide original line while editing to avoid overlap with preview
+        // Remove original line while editing so only the edit preview is visible.
+        if (fragment.binding.mapView.overlays.contains(ls)) {
+            fragment.binding.mapView.overlays.remove(ls)
+        }
         fragment.binding.mapView.invalidate()
         hideCollectPointBottomSheet(finalizeSegment = false, showNav = false)
         if (!isRestoring) {
@@ -5465,6 +5473,8 @@ class MappingFragmentLogic(
         // Capture original state for revert-on-cancel ONLY if starting a fresh session
         if (!isRestoring && originalEditLineState == null) {
             originalEditLineState = ls.labeledPoints.toList()
+            originalEditLineCodeId = ls.codeId
+            originalEditLineFeatureCode = ls.featureCode
         }
         if (!isRestoring) isEditLineSaved = false
 
@@ -5585,7 +5595,6 @@ class MappingFragmentLogic(
         }
 
         sheetBinding.llCodeValue.setOnClickListener {
-            isEditLineSaved = true // Prevent revert when hiding to change code
             // Keep edit line visible underneath; show select code above it
             showSelectCodeBottomSheet(
                 null,
@@ -5754,24 +5763,9 @@ class MappingFragmentLogic(
         }
 
         sheetBinding.btnCloseEditLine.setOnClickListener {
-            // Revert visual changes: Remove the temporary edited overlay
-            if (fragment.highlightedLineOverlay != null && fragment.highlightedLineOverlay != ls) {
-                fragment.binding.mapView.overlays.remove(fragment.highlightedLineOverlay)
-            }
-
-            // Restore the original line overlay if it was removed
-            if (!fragment.binding.mapView.overlays.contains(ls)) {
-                fragment.binding.mapView.overlays.add(ls)
-            }
-
-            // Deselect logic handles unhighlighting, but we ensure original is clean
-            ls.unhighlight()
-
             // Explicit close should exit selection mode to avoid reopening
             fragment.isSelectingPointForEditLine = false
-
-            // Ensure original line is visible before closing to avoid blink
-            ls.isEnabled = true
+            isEditLineSaved = false
 
             // Close edit line explicitly (do not reopen via back stack)
             clearBackStack()
@@ -5864,11 +5858,16 @@ class MappingFragmentLogic(
     ) {
         // Revert logic if not saved AND not just hiding to select a point
         if (!fragment.isSelectingPointForEditLine) {
-            if (!isEditLineSaved && originalEditLineState != null && fragment.highlightedLineOverlay != null) {
-                // Restore geometry
-                val ls = fragment.highlightedLineOverlay!!
-                val originalIds = originalEditLineState!!.map { it.id }.toSet()
-                val dirtyPoints = ls.labeledPoints
+            if (!isEditLineSaved && originalEditLineState != null) {
+                val originalPoints = originalEditLineState!!
+                val lineForRevert = fragment.pendingEditLineSegment ?: fragment.highlightedLineOverlay
+                val lineCodeForRevert = originalEditLineCodeId ?: lineForRevert?.codeId ?: ""
+                val originalIds = originalPoints.map { it.id }.toSet()
+                val dirtyPoints =
+                    fragment.currentEditLineAdapter?.getPoints()
+                        ?: fragment.highlightedLineOverlay?.labeledPoints
+                        ?: lineForRevert?.labeledPoints
+                        ?: emptyList()
 
                 // 1. Detach points that were added (in dirty but not in original)
                 // These points were given the line code, so we must strip it
@@ -5884,25 +5883,38 @@ class MappingFragmentLogic(
 
                 // 2. Re-attach points that were removed (in original but maybe not in dirty)
                 // These points lost the line code, so we must restore it
-                originalEditLineState!!.forEach { pt ->
+                originalPoints.forEach { pt ->
                     val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == pt.id }
                     if (idx >= 0) {
                         // Restore codeId to line's code
                         fragment.collectedLabeledPoints[idx] =
-                            fragment.collectedLabeledPoints[idx].copy(codeId = ls.codeId)
+                            fragment.collectedLabeledPoints[idx].copy(codeId = lineCodeForRevert)
                     }
                 }
 
-                updateLineGeometry(ls, originalEditLineState!!)
+                if (lineForRevert != null) {
+                    lineForRevert.codeId = lineCodeForRevert
+                    lineForRevert.featureCode =
+                        originalEditLineFeatureCode
+                            ?: lineCodeForRevert.filter { it.isLetter() }.ifEmpty { "L" }
+                    updateLineGeometry(lineForRevert, originalPoints)
+                }
             }
             originalEditLineState = null // Clear state since session ended
+            originalEditLineCodeId = null
+            originalEditLineFeatureCode = null
         }
 
         val root = fragment.binding.bottomSheetEditLine.root
         animateSheetTransition(root, null, transition) {
             if (!fragment.isSelectingPointForEditLine) {
-                fragment.pendingEditLineSegment?.isEnabled = true // Restore original line visibility
-                fragment.pendingEditLineSegment?.unhighlight()
+                val originalLine = fragment.pendingEditLineSegment
+                if (!isEditLineSaved && originalLine != null) {
+                    originalLine.unhighlight()
+                    if (!fragment.binding.mapView.overlays.contains(originalLine)) {
+                        addPolylineBelowMarkers(originalLine)
+                    }
+                }
                 fragment.pendingEditLineSegment = null
 
                 fragment.highlightedLineOverlay?.let { fragment.binding.mapView.overlays.remove(it) }
@@ -5913,6 +5925,7 @@ class MappingFragmentLogic(
             fragment.currentEditLineAdapter = null
             fragment.currentEditLineBinding = null
             fragment.selectedPoint = null
+            isEditLineSaved = false
             updateMarkersForZoom(forceRefresh = true)
             fragment.binding.mapView.invalidate()
             if (fragment.binding.bottomSheetCollectPoint.root.visibility == View.GONE && fragment.currentLineCodeId != null) {
