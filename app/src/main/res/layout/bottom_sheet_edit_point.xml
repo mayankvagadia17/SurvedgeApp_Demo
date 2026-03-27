@@ -78,7 +78,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/_10sdp"
-            android:text="Content"
+            android:text="Note"
             android:textColor="@color/text_primary"
             android:textSize="@dimen/_10ssp"
             android:textStyle="bold"
@@ -91,13 +91,102 @@
             android:layout_height="@dimen/_40sdp"
             android:layout_marginTop="@dimen/_6sdp"
             android:background="@drawable/bg_input_field"
-            android:hint="Content here...."
+            android:hint="Note here...."
             android:inputType="text"
             android:paddingHorizontal="@dimen/_15sdp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_secondary"
             android:textSize="@dimen/_12ssp"
             app:layout_constraintTop_toBottomOf="@id/tv_content_label" />
+
+        <View
+            android:id="@+id/view_code_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="@dimen/_12sdp"
+            android:background="@drawable/divider_horizontal"
+            app:layout_constraintTop_toBottomOf="@id/et_content" />
+
+        <TextView
+            android:id="@+id/tv_code_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/_12sdp"
+            android:text="Code"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/_10ssp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/view_code_divider" />
+
+        <LinearLayout
+            android:id="@+id/ll_code_value"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            app:layout_constraintBottom_toBottomOf="@id/tv_code_label"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/tv_code_label"
+            app:layout_constraintWidth_percent="0.62">
+
+            <TextView
+                android:id="@+id/tv_code_description"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:gravity="end"
+                android:maxLines="1"
+                android:text="Default Point"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/_10ssp" />
+
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/ll_code_type_selector"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/_30sdp"
+                android:layout_marginStart="@dimen/_8sdp"
+                android:background="@drawable/bg_dropdown"
+                android:paddingHorizontal="@dimen/_10sdp">
+
+                <ImageView
+                    android:id="@+id/view_code_type_dot"
+                    android:layout_width="@dimen/_8sdp"
+                    android:layout_height="@dimen/_8sdp"
+                    android:src="@drawable/point_type_dot"
+                    app:layout_constraintBottom_toBottomOf="@id/tv_code_id"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="@id/tv_code_id"
+                    app:tint="@color/slate_gray" />
+
+                <TextView
+                    android:id="@+id/tv_code_id"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/_4sdp"
+                    android:text="P"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/_12ssp"
+                    android:textStyle="bold"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintStart_toEndOf="@id/view_code_type_dot"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <ImageView
+                    android:layout_width="@dimen/_14sdp"
+                    android:layout_height="@dimen/_14sdp"
+                    android:layout_marginStart="@dimen/_5sdp"
+                    android:src="@drawable/ic_dropdown_arrow"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintStart_toEndOf="@id/tv_code_id"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:tint="@color/text_secondary" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+        </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_save"
@@ -113,7 +202,7 @@
             android:background="@drawable/bg_button_save"
             app:backgroundTint="@null"
             app:cornerRadius="@dimen/_12sdp"
-            app:layout_constraintTop_toBottomOf="@id/et_content" />
+            app:layout_constraintTop_toBottomOf="@id/tv_code_label" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -2701,15 +2701,81 @@ class MappingFragmentLogic(
 
             sheetBinding.llPointTypeSelector.setOnClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
-                showSelectCodeBottomSheet(sheetBinding) { codeId, type ->
-                    if (fragment.selectedPointIndicatorType == IndicatorType.LINE && (type != IndicatorType.LINE || fragment.currentLineCodeId != codeId)) finalizeCurrentLineSegment()
-                    fragment.selectedPointCodeId = codeId
-                    fragment.selectedPointIndicatorType = type
-                    updatePointTypeIndicator(sheetBinding.viewTypeDot, type)
-                    sheetBinding.tvPointType.text = codeId
-                    if (type == IndicatorType.LINE) trackLineCodeUsage(codeId)
-                    updateCloseShape()
+
+                val openSelectCodeSheet = {
+                    showSelectCodeBottomSheet(sheetBinding) { codeId, type ->
+                        if (fragment.selectedPointIndicatorType == IndicatorType.LINE && (type != IndicatorType.LINE || fragment.currentLineCodeId != codeId)) finalizeCurrentLineSegment()
+                        fragment.selectedPointCodeId = codeId
+                        fragment.selectedPointIndicatorType = type
+                        updatePointTypeIndicator(sheetBinding.viewTypeDot, type)
+                        sheetBinding.tvPointType.text = codeId
+                        if (type == IndicatorType.LINE) trackLineCodeUsage(codeId)
+                        updateCloseShape()
+                    }
                 }
+
+                val linePoints =
+                    if (fragment.selectedPointIndicatorType == IndicatorType.LINE && fragment.currentLineCodeId != null) {
+                        getAllPointsInCurrentLineSegment()
+                    } else {
+                        emptyList()
+                    }
+
+                if (fragment.selectedPointIndicatorType == IndicatorType.LINE &&
+                    fragment.currentLineCodeId != null &&
+                    linePoints.size == 1
+                ) {
+                    showConfirmDialogBottomSheet(
+                        onYesClick = {
+                            val currentAllPoints = getAllPointsInCurrentLineSegment()
+                            if (currentAllPoints.size == 1 && fragment.collectedLabeledPoints.isNotEmpty() &&
+                                isLineCodeFromCodeId(fragment.collectedLabeledPoints.last().codeId)
+                            ) {
+                                val removedPoint = fragment.collectedLabeledPoints.last()
+                                viewModel.deletePointById(removedPoint.id)
+                                fragment.collectedLabeledPoints.removeAt(fragment.collectedLabeledPoints.size - 1)
+
+                                val markersToRemove =
+                                    fragment.markerToPointMap.entries.filter { (_, point) ->
+                                        point.codeId == fragment.currentLineCodeId
+                                    }
+                                markersToRemove.forEach { (marker, _) ->
+                                    fragment.binding.mapView.overlays.remove(marker)
+                                    fragment.markerToPointMap.remove(marker)
+                                    fragment.collectedPointMarkers.remove(marker)
+                                }
+
+                                fragment.polylineOverlay?.let {
+                                    OsmdroidPolylineHelper.removePolyline(
+                                        fragment.binding.mapView,
+                                        it
+                                    )
+                                }
+                                fragment.polylineOverlay = null
+
+                                fragment.liveTrackingLineOverlay?.let {
+                                    OsmdroidPolylineHelper.removePolyline(
+                                        fragment.binding.mapView,
+                                        it
+                                    )
+                                }
+                                fragment.liveTrackingLineOverlay = null
+                                fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
+                                fragment.currentLineCodeId = null
+
+                                refreshNextPointIdForCollectSheet()
+                                updateMarkersForZoom()
+                                fragment.binding.mapView.invalidate()
+                                updateCloseShape()
+                            }
+                            openSelectCodeSheet()
+                        },
+                        onNoClick = { }
+                    )
+                    return@setOnClickListener
+                }
+
+                openSelectCodeSheet()
             }
             sheetBinding.btnLineMenu.setOnClickListener {
                 sheetBinding.clLineMenu.visibility =
@@ -6489,21 +6555,48 @@ class MappingFragmentLogic(
         sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
         sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
         sheetBinding.root.bringToFront()
-        sheetBinding.root.updateLayoutParams<ConstraintLayout.LayoutParams> { bottomMargin = 0 }
+        sheetBinding.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
+            bottomMargin = 0
+            height = 0
+        }
 
-        // Full height like New Point sheet
+        // Match Select Code behavior: full-height constrained sheet.
         applyFullScreenConstraints(sheetBinding.root)
         sheetBinding.root.requestLayout()
 
+            var selectedCodeId = point.codeId
+
+            val updateEditPointCodeUi = {
+                val indicatorType =
+                    if (isLineCodeFromCodeId(selectedCodeId)) IndicatorType.LINE else IndicatorType.POINT
+
+                sheetBinding.tvCodeDescription.text =
+                    getCodeDescription(selectedCodeId).ifEmpty { "No code" }
+                sheetBinding.tvCodeId.text = selectedCodeId.ifEmpty { "" }
+                updatePointTypeIndicator(sheetBinding.viewCodeTypeDot, indicatorType)
+            }
+
             sheetBinding.etPointId.setText(point.id)
             sheetBinding.etPointId.setHint(point.id)
-            sheetBinding.etContent.setText(point.codeId) // Using CodeId as Content
+            sheetBinding.etContent.setText("")
+            updateEditPointCodeUi()
+
+            sheetBinding.llCodeValue.setOnClickListener {
+                showSelectCodeBottomSheet(
+                    null,
+                    onlyPoints = true,
+                    showNavOnCloseOverride = false
+                ) { codeId, indicatorType ->
+                    if (indicatorType != IndicatorType.POINT) return@showSelectCodeBottomSheet
+                    selectedCodeId = codeId
+                    updateEditPointCodeUi()
+                }
+            }
 
             sheetBinding.btnCloseEditPoint.setOnClickListener { hideEditPointBottomSheet() }
 
             sheetBinding.btnSave.setOnClickListener {
                 val newId = sheetBinding.etPointId.text.toString()
-                val newContent = sheetBinding.etContent.text.toString()
 
                 if (newId.isBlank()) {
                     Toast.makeText(
@@ -6515,7 +6608,7 @@ class MappingFragmentLogic(
                 }
 
                 // Update Logic
-                val updatedPoint = point.copy(id = newId, codeId = newContent)
+                val updatedPoint = point.copy(id = newId, codeId = selectedCodeId)
                 val currentProjectId = viewModel.currentProjectId.value ?: 1L
 
                 if (fragment.collectedLabeledPoints.any { it.id == newId && it.id != point.id }) {
