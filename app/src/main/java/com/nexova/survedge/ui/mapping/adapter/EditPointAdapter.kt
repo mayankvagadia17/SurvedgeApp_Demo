@@ -50,15 +50,12 @@ class EditPointAdapter(
     fun getPoints(): List<LabeledPoint> = points.toList()
 
     fun moveItem(fromPosition: Int, toPosition: Int) {
-        if (fromPosition < toPosition) {
-            for (i in fromPosition until toPosition) {
-                points[i] = points[i + 1].also { points[i + 1] = points[i] }
-            }
-        } else {
-            for (i in fromPosition downTo toPosition + 1) {
-                points[i] = points[i - 1].also { points[i - 1] = points[i] }
-            }
+        if (fromPosition !in points.indices || toPosition !in points.indices || fromPosition == toPosition) {
+            return
         }
+
+        val movedPoint = points.removeAt(fromPosition)
+        points.add(toPosition, movedPoint)
         notifyItemMoved(fromPosition, toPosition)
     }
 

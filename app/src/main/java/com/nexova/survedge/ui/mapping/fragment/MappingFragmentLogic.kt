@@ -1263,6 +1263,8 @@ class MappingFragmentLogic(
         val points = adapter.getPoints()
         val geoPoints = points.map { it.geoPoint }
         val isClosed = fragment.currentEditLineBinding?.cbClosedLine?.isChecked == true
+        val editingCodeId = fragment.pendingEditLineSegment?.codeId
+            ?: points.firstOrNull()?.codeId.orEmpty()
 
         // Cleanup existing overlays
         fragment.highlightedLineOverlay?.let {
@@ -1274,6 +1276,18 @@ class MappingFragmentLogic(
             if (fragment.binding.mapView.overlays.contains(it)) {
                 fragment.binding.mapView.overlays.remove(it)
             }
+        }
+
+        if (editingCodeId.isNotEmpty()) {
+            val staleSameCodeOverlays =
+                fragment.binding.mapView.overlays.filterIsInstance<ClickablePolylineOverlay>()
+                    .filter {
+                        it.codeId == editingCodeId &&
+                                it !== fragment.highlightedLineOverlay &&
+                                it !== fragment.closingSegmentOverlay
+                    }
+                    .toList()
+            staleSameCodeOverlays.forEach { fragment.binding.mapView.overlays.remove(it) }
         }
         fragment.closingSegmentOverlay = null
 
@@ -5516,6 +5530,12 @@ class MappingFragmentLogic(
         if (fragment.binding.mapView.overlays.contains(ls)) {
             fragment.binding.mapView.overlays.remove(ls)
         }
+        // Also remove any stale overlays with the same code to avoid double-rendering while reordering.
+        val staleSameCodeOverlays =
+            fragment.binding.mapView.overlays.filterIsInstance<ClickablePolylineOverlay>()
+                .filter { it.codeId == ls.codeId }
+                .toList()
+        staleSameCodeOverlays.forEach { fragment.binding.mapView.overlays.remove(it) }
         fragment.binding.mapView.invalidate()
         hideCollectPointBottomSheet(finalizeSegment = false, showNav = false)
         if (!isRestoring) {
@@ -5777,14 +5797,24 @@ class MappingFragmentLogic(
                     Toast.LENGTH_SHORT
                 ).show()
 
-                OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, ls)
-                fragment.completedLineOverlays.remove(ls)
+                val staleSavedOverlays =
+                    fragment.completedLineOverlays.filterIsInstance<ClickablePolylineOverlay>()
+                        .filter { it.codeId == ls.codeId }
+                        .toList()
+                staleSavedOverlays.forEach {
+                    OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
+                }
+                fragment.completedLineOverlays.removeAll(staleSavedOverlays.toSet())
 
                 // Also remove the temporary edit overlay if it exists
                 if (fragment.highlightedLineOverlay != null && fragment.highlightedLineOverlay != ls) {
                     fragment.binding.mapView.overlays.remove(fragment.highlightedLineOverlay)
                 }
                 fragment.highlightedLineOverlay = null
+                fragment.closingSegmentOverlay?.let {
+                    fragment.binding.mapView.overlays.remove(it)
+                }
+                fragment.closingSegmentOverlay = null
 
                 val updated = ClickablePolylineOverlay(
                     gps,
