@@ -2120,10 +2120,13 @@ class MappingFragmentLogic(
                 if (sheetBinding.clLineMenu.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
         sheetBinding.llContinueCollect.visibility = View.GONE
+        sheetBinding.btnMenu.visibility = if (isLine) View.GONE else View.VISIBLE
 
         setupBottomSheetClickToHideMenu(sheetBinding.root, sheetBinding)
         setupSwipeGestureForPointLineSelection(sheetBinding.root, sheetBinding)
 
+        // Hide delete for line points — only standalone points can be deleted from here
+        sheetBinding.llDeletePointButton.visibility = if (isLine) View.GONE else View.VISIBLE
         sheetBinding.llDeletePointButton.setOnClickListener {
             deletePoint(point)
         }
