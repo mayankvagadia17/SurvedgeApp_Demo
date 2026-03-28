@@ -5117,10 +5117,7 @@ class MappingFragmentLogic(
                     b.nsvInfo.visibility = prevInfoVis
                     b.clLineMenu.visibility = prevMenuVis
 
-                    // Safety: Ensure originalHeight is enough to show the button (approx 320dp for this header + buttons)
-                    val density = fragment.resources.displayMetrics.density
-                    val safeMinHeight = (320 * density).toInt()
-                    if (originalHeight < safeMinHeight) originalHeight = safeMinHeight
+                    // No artificial minimum: let the actual measured content height be the collapsed size
 
                     false
                 }
@@ -5199,14 +5196,15 @@ class MappingFragmentLogic(
                         // Expand if dragged 15% of the way between original and full
                         val expansionThreshold = originalHeight + (fullHeight - originalHeight) * 0.15
 
-                        // QUICK COLLAPSE: If dragging DOWN from the top and crossed a small threshold (100px)
-                        val isQuickCollapseTriggered = startHeight > fullHeight - 50 && deltaY < -100
-
                         // QUICK EXPAND: If dragging UP from the bottom and crossed a small threshold (100px)
                         val isQuickExpandTriggered = startHeight < originalHeight + 50 && deltaY > 100
 
-                        if ((currentHeight < expansionThreshold && !isQuickExpandTriggered) || isQuickCollapseTriggered) {
-                            // Snap back to original (Collapsed)
+                        // Collapse: dragged below expansion threshold OR dragged DOWN from expanded state
+                        val shouldCollapse = (currentHeight < expansionThreshold && !isQuickExpandTriggered) ||
+                                (startHeight > originalHeight + 50 && deltaY < -100)
+
+                        if (shouldCollapse) {
+                            // Snap back to collapsed height — just hide the info panel, do NOT close the sheet
                             val anim = ValueAnimator.ofInt(currentHeight, originalHeight)
                             anim.addUpdateListener { va ->
                                 val lp = v.layoutParams as ConstraintLayout.LayoutParams
@@ -5216,8 +5214,8 @@ class MappingFragmentLogic(
                             }
                             anim.addListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    // Hide info only after fully collapsed
                                     b.nsvInfo.visibility = View.GONE
+                                    b.llPointLineInfo.visibility = View.GONE
                                 }
                             })
                             anim.duration = 200
