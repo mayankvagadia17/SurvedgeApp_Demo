@@ -230,8 +230,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/_15sdp"
-            android:fillViewport="true"
-            app:layout_constraintBottom_toBottomOf="parent"
+            android:fillViewport="false"
             app:layout_constraintTop_toBottomOf="@id/ll_button_container">
 
             <LinearLayout
@@ -716,4 +715,3 @@
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-

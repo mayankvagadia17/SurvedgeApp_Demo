@@ -3078,6 +3078,7 @@ class MappingFragmentLogic(
         onlyLines: Boolean = false,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         showNavOnCloseOverride: Boolean? = null,
+        advanceLineCode: Boolean = true,
         onCodeSelected: (String, IndicatorType) -> Unit
     ) = hideMenu {
         val sheetBinding = fragment.binding.bottomSheetSelectCode
@@ -3105,9 +3106,10 @@ class MappingFragmentLogic(
                 }.toMutableList()
 
             val adapter = CodeAdapter(allCodes) { code ->
-                var finalId = code.abbreviation
-                if (code.indicatorType == IndicatorType.LINE) {
-                    finalId = nextLineCode(finalId)
+                val finalId = if (code.indicatorType == IndicatorType.LINE && advanceLineCode) {
+                    nextLineCode(code.abbreviation)
+                } else {
+                    code.abbreviation
                 }
                 onCodeSelected(finalId, code.indicatorType)
                 hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose)
@@ -5622,7 +5624,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 onlyPoints = false,
                 onlyLines = true,
                 transition = BottomSheetTransition.SLIDE_UP,
-                showNavOnCloseOverride = false
+                showNavOnCloseOverride = false,
+                advanceLineCode = false
             ) { codeId, indicatorType ->
                 if (indicatorType != IndicatorType.LINE) {
                     // Only line codes are valid here
