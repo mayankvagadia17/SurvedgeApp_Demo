@@ -228,7 +228,7 @@
         <androidx.core.widget.NestedScrollView
             android:id="@+id/nsv_info"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
+            android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/_15sdp"
             android:fillViewport="true"
             app:layout_constraintBottom_toBottomOf="parent"

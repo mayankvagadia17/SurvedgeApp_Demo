@@ -732,6 +732,40 @@ class MappingFragmentLogic(
         view.requestLayout()
     }
 
+    private fun resetLineSegmentSheetToDefaultState() {
+        val sheetBinding = fragment.binding.bottomSheetLineSegment
+        val params = sheetBinding.root.layoutParams as? ConstraintLayout.LayoutParams ?: return
+
+        val topUiClearance = fragment.resources.getDimensionPixelSize(
+            fragment.resources.getIdentifier(
+                "_70sdp",
+                "dimen",
+                fragment.requireContext().packageName
+            )
+        )
+
+        params.height = ViewGroup.LayoutParams.WRAP_CONTENT
+        params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        params.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        params.verticalBias = 1.0f
+        params.constrainedHeight = true
+        params.topMargin = statusBarHeight + topUiClearance
+        params.bottomMargin = bottomNavOffset.toInt()
+
+        sheetBinding.root.layoutParams = params
+        sheetBinding.root.translationX = 0f
+        sheetBinding.root.translationY = 0f
+        sheetBinding.root.alpha = 1f
+
+        // Always reopen with collapsed/default content state.
+        sheetBinding.nsvInfo.visibility = View.GONE
+        sheetBinding.llPointLineInfo.visibility = View.GONE
+        sheetBinding.clLineMenu.visibility = View.GONE
+        sheetBinding.root.requestLayout()
+    }
+
     fun showNewLineBottomSheet(
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         isRestoring: Boolean = false
@@ -1861,6 +1895,9 @@ class MappingFragmentLogic(
         // Ensure bottom navigation is visible for line segment sheet
         showBottomNavigation()
 
+        // Start from a clean default state every time.
+        resetLineSegmentSheetToDefaultState()
+
         // Ensure accurate offset is applied before showing
         val sheetBinding = fragment.binding.bottomSheetLineSegment
         sheetBinding.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
@@ -2023,6 +2060,7 @@ class MappingFragmentLogic(
 
         animateSheetTransition(sheetBinding.root, null, transition) {
             onHidden?.invoke()
+            resetLineSegmentSheetToDefaultState()
             sheetBinding.llPointLineInfo.visibility = View.GONE
 
             // RESTORE map interaction and buttons when closed
@@ -2086,6 +2124,9 @@ class MappingFragmentLogic(
 
         // Ensure bottom navigation is visible for line segment sheet
         showBottomNavigation()
+
+        // Start from a clean default state every time.
+        resetLineSegmentSheetToDefaultState()
 
         // Ensure accurate offset is applied before showing
         val sheetBinding = fragment.binding.bottomSheetLineSegment
@@ -5041,13 +5082,42 @@ class MappingFragmentLogic(
     }
 
     fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBinding) {
-        v.isClickable = true
         var initialY = 0f
         var initialX = 0f
         var isDragging = false
-        var originalHeight = 0
-        var startHeight = 0
-        var lastEventTime = 0L // Bubbling guard
+        val swipeThresholdPx = 8f
+
+        fun enforceWrapContentSheetLayout() {
+            val rootLp = b.root.layoutParams as? ConstraintLayout.LayoutParams ?: return
+            rootLp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            rootLp.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.verticalBias = 1.0f
+            rootLp.constrainedHeight = true
+            b.root.layoutParams = rootLp
+        }
+
+        fun enforceFullHeightSheetLayout() {
+            val rootLp = b.root.layoutParams as? ConstraintLayout.LayoutParams ?: return
+            val baseMargin = try {
+                fragment.resources.getDimensionPixelSize(com.intuit.sdp.R.dimen._10sdp)
+            } catch (e: Exception) {
+                (25 * fragment.resources.displayMetrics.density).toInt()
+            }
+
+            rootLp.height = 0
+            rootLp.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+            rootLp.verticalBias = 0.5f
+            rootLp.constrainedHeight = false
+            rootLp.topMargin = statusBarHeight + baseMargin
+            rootLp.bottomMargin = bottomNavOffset.toInt()
+            b.root.layoutParams = rootLp
+        }
 
         fun refreshPointLineData() {
             val isLineMode = fragment.highlightedLineOverlay != null
@@ -5083,45 +5153,79 @@ class MappingFragmentLogic(
             return false
         }
 
-        val gestureListener = View.OnTouchListener { view, event ->
-            if (b.clLineMenu.visibility == View.VISIBLE && !isInMenu(view)) {
+        fun showInfo() {
+            enforceFullHeightSheetLayout()
+
+            (b.nsvInfo.layoutParams as? ConstraintLayout.LayoutParams)?.let { infoLp ->
+                infoLp.matchConstraintMaxHeight = 0
+                infoLp.height = 0
+                infoLp.topToBottom = R.id.ll_button_container
+                infoLp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                infoLp.topMargin = 0
+                b.nsvInfo.layoutParams = infoLp
+            }
+
+            b.nsvInfo.visibility = View.VISIBLE
+            b.llPointLineInfo.visibility = View.VISIBLE
+
+            val isLineMode = fragment.highlightedLineOverlay != null
+            val isPointMode = fragment.selectedPoint != null
+
+            when {
+                isLineMode -> {
+                    refreshPointLineData()
+                }
+                isPointMode -> {
+                    refreshPointLineData()
+                }
+                // Fallback: if runtime state is briefly null, infer from UI and still show something.
+                b.txtPointId.visibility == View.VISIBLE -> {
+                    b.clPointInfo.visibility = View.VISIBLE
+                    b.clLineInfo.visibility = View.GONE
+                }
+                else -> {
+                    b.clLineInfo.visibility = View.VISIBLE
+                    b.clPointInfo.visibility = View.GONE
+                }
+            }
+
+            b.nsvInfo.requestLayout()
+            b.root.requestLayout()
+        }
+
+        fun hideInfo() {
+            enforceWrapContentSheetLayout()
+            b.clLineMenu.visibility = View.GONE
+            b.nsvInfo.visibility = View.GONE
+            b.llPointLineInfo.visibility = View.GONE
+
+            (b.nsvInfo.layoutParams as? ConstraintLayout.LayoutParams)?.let { infoLp ->
+                infoLp.height = 0
+                infoLp.topToBottom = R.id.ll_button_container
+                infoLp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                infoLp.topMargin = fragment.resources.getDimensionPixelSize(
+                    fragment.resources.getIdentifier(
+                        "_15sdp",
+                        "dimen",
+                        fragment.requireContext().packageName
+                    )
+                )
+                b.nsvInfo.layoutParams = infoLp
+            }
+
+            b.root.requestLayout()
+        }
+
+        val gestureListener = View.OnTouchListener { touchedView, event ->
+            if (b.clLineMenu.visibility == View.VISIBLE && !isInMenu(touchedView)) {
                 hidePointLineSelection(b)
             }
-            if (view.canScrollVertically(-1) && !isDragging) return@OnTouchListener false
-
-            // Bubbling guard: process each event only once
-            if (event.eventTime == lastEventTime) return@OnTouchListener isDragging
-            lastEventTime = event.eventTime
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialY = event.rawY
                     initialX = event.rawX
                     isDragging = false
-
-                    // Capture startHeight accurately
-                    startHeight = v.height
-
-                    // FORCE MEASURE the "ideal" collapsed height (Header + Buttons)
-                    // We hide the info scrollview to measure just the permanent tools
-                    val prevInfoVis = b.nsvInfo.visibility
-                    val prevMenuVis = b.clLineMenu.visibility
-
-                    b.nsvInfo.visibility = View.GONE
-                    b.clLineMenu.visibility = View.GONE
-
-                    v.measure(
-                        View.MeasureSpec.makeMeasureSpec((v.parent as View).width, View.MeasureSpec.EXACTLY),
-                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                    )
-                    originalHeight = v.measuredHeight
-
-                    // Restore original states
-                    b.nsvInfo.visibility = prevInfoVis
-                    b.clLineMenu.visibility = prevMenuVis
-
-                    // No artificial minimum: let the actual measured content height be the collapsed size
-
                     false
                 }
 
@@ -5129,142 +5233,33 @@ class MappingFragmentLogic(
                     val deltaY = initialY - event.rawY
                     val deltaX = initialX - event.rawX
 
-                    val parentHeight = (v.parent as? View)?.height ?: fragment.resources.displayMetrics.heightPixels
-                    val currentBottomMargin = (v.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
-                    val baseMargin = try {
-                        fragment.resources.getDimensionPixelSize(com.intuit.sdp.R.dimen._10sdp)
-                    } catch (e: Exception) {
-                        (25 * fragment.resources.displayMetrics.density).toInt()
-                    }
-                    val fullHeight = parentHeight - (statusBarHeight + baseMargin + currentBottomMargin)
-
-                    if (!isDragging && Math.abs(deltaY) > 20f && Math.abs(deltaY) > Math.abs(deltaX)) {
-                        // Guard: Don't allow swiping UP if already at/above full height limit
-                        if (startHeight >= fullHeight - 10 && deltaY > 0) {
-                            isDragging = false
-                        } else {
-                            isDragging = true
-                            view.parent?.requestDisallowInterceptTouchEvent(true)
-
-                            // Transition from constraints to height-based layout
-                            (v.layoutParams as? ConstraintLayout.LayoutParams)?.let { lp ->
-                                if (lp.topToTop != ConstraintLayout.LayoutParams.UNSET) {
-                                    lp.topToTop = ConstraintLayout.LayoutParams.UNSET
-                                    lp.height = v.height
-                                    v.layoutParams = lp
-                                    startHeight = v.height
-                                }
-                            }
-
-                            // Always show nsvInfo when drag begins (layout will give it space as root grows)
-                            b.nsvInfo.visibility = View.VISIBLE
-                            refreshPointLineData()
-                            b.nsvInfo.requestLayout()
-                        }
+                    if (!isDragging && Math.abs(deltaY) > swipeThresholdPx && Math.abs(deltaY) > Math.abs(deltaX)) {
+                        isDragging = true
+                        touchedView.parent?.requestDisallowInterceptTouchEvent(true)
                     }
 
                     if (isDragging) {
-                        val newHeight = (startHeight + deltaY).toInt()
-                        val constrainedHeight = newHeight.coerceAtMost(fullHeight)
-                        val finalHeight = Math.max(originalHeight, constrainedHeight)
-
-                        // Apply height and request layout so constraints re-measure nsvInfo
-                        val layoutParams = v.layoutParams
-                        layoutParams.height = finalHeight
-                        v.layoutParams = layoutParams
-                        v.requestLayout()
-
                         return@OnTouchListener true
                     }
-                    false // Propagate
+                    false
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    touchedView.parent?.requestDisallowInterceptTouchEvent(false)
+                    val deltaY = initialY - event.rawY
+                    val deltaX = initialX - event.rawX
 
                     if (isDragging) {
-                        val deltaY = initialY - event.rawY
-                        val currentHeight = v.height
-
-                        val parentHeight = (v.parent as? View)?.height ?: fragment.resources.displayMetrics.heightPixels
-                        val currentBottomMargin = (v.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
-                        val baseMargin = try {
-                            fragment.resources.getDimensionPixelSize(com.intuit.sdp.R.dimen._10sdp)
-                        } catch (e: Exception) {
-                            (25 * fragment.resources.displayMetrics.density).toInt()
+                        when {
+                            deltaY > swipeThresholdPx && Math.abs(deltaY) > Math.abs(deltaX) -> showInfo()
+                            deltaY < -swipeThresholdPx && Math.abs(deltaY) > Math.abs(deltaX) -> hideInfo()
                         }
-                        // Target full expansion height
-                        val fullHeight = parentHeight - (statusBarHeight + baseMargin + currentBottomMargin)
-
-                        // Expand if dragged 15% of the way between original and full
-                        val expansionThreshold = originalHeight + (fullHeight - originalHeight) * 0.15
-
-                        // QUICK EXPAND: If dragging UP from the bottom and crossed a small threshold (100px)
-                        val isQuickExpandTriggered = startHeight < originalHeight + 50 && deltaY > 100
-
-                        // Collapse: dragged below expansion threshold OR dragged DOWN from expanded state
-                        val shouldCollapse = (currentHeight < expansionThreshold && !isQuickExpandTriggered) ||
-                                (startHeight > originalHeight + 50 && deltaY < -100)
-
-                        if (shouldCollapse) {
-                            // Snap back to collapsed height — just hide the info panel, do NOT close the sheet
-                            val anim = ValueAnimator.ofInt(currentHeight, originalHeight)
-                            anim.addUpdateListener { va ->
-                                val lp = v.layoutParams as ConstraintLayout.LayoutParams
-                                lp.height = va.animatedValue as Int
-                                lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-                                v.layoutParams = lp
-                            }
-                            anim.addListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    b.nsvInfo.visibility = View.GONE
-                                    b.llPointLineInfo.visibility = View.GONE
-                                }
-                            })
-                            anim.duration = 200
-                            anim.interpolator = OvershootInterpolator(0.5f)
-                            anim.start()
-
-                            // RESTORE map interaction and buttons
-                            fragment.binding.mapView.setMultiTouchControls(true)
-                            setMapTouchForLineSegment(blockMap = false)
-                            fragment.binding.llMapsButtons.visibility = View.VISIBLE
-                        } else {
-                            // Ensure info is visible BEFORE animation starts
-                            b.nsvInfo.visibility = View.VISIBLE
-                            refreshPointLineData()
-
-                            // Snap to Full Height (Expanded)
-                            val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
-                            anim.addUpdateListener { va ->
-                                val lp = v.layoutParams as ConstraintLayout.LayoutParams
-                                lp.height = va.animatedValue as Int
-                                lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-                                v.layoutParams = lp
-                                // Force nsvInfo to re-measure on every frame
-                                b.nsvInfo.requestLayout()
-                            }
-                            anim.addListener(object : android.animation.AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    applyFullScreenConstraints(v)
-                                    b.nsvInfo.visibility = View.VISIBLE
-                                    b.nsvInfo.requestLayout()
-                                }
-                            })
-                            anim.duration = 200
-                            anim.interpolator = FastOutSlowInInterpolator()
-                            anim.start()
-
-                            // LOCK map interaction and hide buttons
-                            fragment.binding.mapView.setMultiTouchControls(false)
-                            setMapTouchForLineSegment(blockMap = true)
-                            fragment.binding.llMapsButtons.visibility = View.GONE
-                        }
-                        isDragging = false
                         return@OnTouchListener true
                     }
+
                     isDragging = false
-                    false // Propagate
+                    touchedView.performClick()
+                    false
                 }
 
                 else -> false
