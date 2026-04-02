@@ -2027,7 +2027,7 @@ class MappingFragmentLogic(
             }
 
             // Ensure bottom navigation is visible for line segment sheet
-            showBottomNavigation()
+            showBottomNavigation(force = true)
 
             sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
             sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
@@ -2229,7 +2229,7 @@ class MappingFragmentLogic(
                 updateMarkersForZoom(forceRefresh = true)
 
                 // Ensure bottom navigation is visible for detail sheets
-                showBottomNavigation()
+                showBottomNavigation(force = true)
 
                 // Start from a clean default state
                 resetLineSegmentSheetToDefaultState()
@@ -4259,6 +4259,13 @@ class MappingFragmentLogic(
     }
 
     internal fun restoreStateAfterClosingInfoSheet() {
+        // 🛑 CRITICAL FIX FOR HANG STATE: Always re-enable map touch explicitly when returning to base state
+        fragment.binding.mapView.setMultiTouchControls(true)
+        fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>()
+            .forEach { it.isEnabled = true }
+        fragment.binding.mapView.setOnTouchListener(null)
+        fragment.binding.llMapsButtons.visibility = View.VISIBLE
+
         if (fragment.stakeoutSession != null) {
             fragment.helper.showStakeoutUI()
             // Force measurement update to restore visuals (lines, circles, etc.)
@@ -4297,8 +4304,8 @@ class MappingFragmentLogic(
         } ?: onEnd?.invoke()
     }
 
-    fun showBottomNavigation() {
-        if (isAnyBottomSheetOpenExcludingLineSegment()) return
+    fun showBottomNavigation(force: Boolean = false) {
+        if (!force && isAnyBottomSheetOpenExcludingLineSegment()) return
 
         (fragment.activity as? MainActivity)?.setNavHiddenState(false)
 
@@ -4397,12 +4404,16 @@ class MappingFragmentLogic(
         val proj = fragment.binding.mapView.projection
         val p = Point(); proj.toPixels(geo, p)
         val density = fragment.resources.displayMetrics.density
-        val pointTol = 35f * density // 35dp tolerance for a sloppy point hit
+        val pointTol = 24f * density // 24dp tolerance (48dp touch target) for precision
         var best: LabeledPoint? = null
         var minD = Float.MAX_VALUE
 
         // Find nearest point
         fragment.collectedLabeledPoints.forEach { pt ->
+            // Prevent selection of "ghost" points hidden by zoom clustering
+            val isVisible = pointMarkersCache[pt.id]?.pointMarker?.isEnabled ?: true
+            if (!isVisible) return@forEach
+
             val pp = Point(); proj.toPixels(pt.geoPoint, pp)
             val dx = p.x - pp.x
             val dy = p.y - pp.y
@@ -4430,10 +4441,10 @@ class MappingFragmentLogic(
 
             // SMART SELECTION LOGIC
             
-            // Case 1: Point is a solid/direct hit (within 25dp)
+            // Case 1: Point is a solid/direct hit (within 24dp)
             // We ALWAYS prefer the point, UNLESS the line is substantially closer.
-            // Example: tap is 24dp from point, but 2dp from line -> pick line.
-            if (minD <= 25f * density) {
+            // Example: tap is 23dp from point, but 2dp from line -> pick line.
+            if (minD <= 24f * density) {
                 if (minLineDist <= 10f * density && minD > minLineDist + 10f * density) {
                     return null // User definitively hit the line, let line overlay handle it
                 }
@@ -5785,7 +5796,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 onlyLines = true,
                 transition = BottomSheetTransition.SLIDE_UP,
                 showNavOnCloseOverride = false,
-                advanceLineCode = false
+                advanceLineCode = true
             ) { codeId, indicatorType ->
                 if (indicatorType != IndicatorType.LINE) {
                     // Only line codes are valid here
