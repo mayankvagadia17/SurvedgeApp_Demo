@@ -2138,7 +2138,7 @@ class MappingFragmentLogic(
                 deleteLineSegment(lineSegment)
             }
 
-            sheetBinding.btnStakeout.setOnClickListener {
+            sheetBinding.btnStakeout.setSwipeSafeClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
                 val points = lineSegment.labeledPoints.map {
                     StakeoutPoint(
@@ -2292,7 +2292,7 @@ class MappingFragmentLogic(
 
                 setupFilterDropdown(sheetBinding, point)
 
-                sheetBinding.btnStakeout.setOnClickListener {
+                sheetBinding.btnStakeout.setSwipeSafeClickListener {
                     hidePointLineSelection(sheetBinding)
                     val sp = StakeoutPoint(
                         id = point.id,
@@ -5337,6 +5337,43 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
 
         attachEverywhere(b.root)
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun View.setSwipeSafeClickListener(onClick: () -> Unit) {
+        var startX = 0f
+        var startY = 0f
+        var isSwipe = false
+        setOnTouchListener { v, event ->
+            val touchSlop = 15f * v.resources.displayMetrics.density
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startX = event.x
+                    startY = event.y
+                    isSwipe = false
+                    false
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = Math.abs(event.x - startX)
+                    val dy = Math.abs(event.y - startY)
+                    if (dx > touchSlop || dy > touchSlop) {
+                        isSwipe = true
+                    }
+                    false
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (isSwipe) {
+                        v.isPressed = false
+                        true // Consume event, suppress click
+                    } else {
+                        v.performClick()
+                        onClick()
+                        true
+                    }
+                }
+                else -> false
+            }
+        }
     }
 
     fun setupSwipeGestureForEditLine(v: View, sheetBinding: BottomSheetEditLineBinding) {
