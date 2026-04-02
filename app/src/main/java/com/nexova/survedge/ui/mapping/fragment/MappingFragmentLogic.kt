@@ -4397,28 +4397,25 @@ class MappingFragmentLogic(
     fun findNearestPoint(geo: GeoPoint): LabeledPoint? {
         val proj = fragment.binding.mapView.projection
         val p = Point(); proj.toPixels(geo, p)
-        val tol =
-            40f * fragment.resources.displayMetrics.density // Reduced tolerance for precision (was 100f)
+        val density = fragment.resources.displayMetrics.density
+        val pointTol = 35f * density // 35dp tolerance for a sloppy point hit
         var best: LabeledPoint? = null
         var minD = Float.MAX_VALUE
 
-        // Optimized: Only iterate collectedLabeledPoints (it contains all DB points)
-        // Removed redundant checks on markerToPointMap and completedLineOverlays
+        // Find nearest point
         fragment.collectedLabeledPoints.forEach { pt ->
             val pp = Point(); proj.toPixels(pt.geoPoint, pp)
-            val d = Math.sqrt(
-                Math.pow((p.x - pp.x).toDouble(), 2.0) + Math.pow(
-                    (p.y - pp.y).toDouble(),
-                    2.0
-                )
-            ).toFloat()
-            if (d < minD && d <= tol) {
+            val dx = p.x - pp.x
+            val dy = p.y - pp.y
+            val d = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            if (d < minD) {
                 minD = d; best = pt
             }
         }
 
         if (best != null) {
             var minLineDist = Float.MAX_VALUE
+            // Find nearest line
             fragment.completedLineOverlays.forEach { overlay ->
                 if (overlay is ClickablePolylineOverlay) {
                     val dist = overlay.distanceToPolyline(
@@ -4431,12 +4428,30 @@ class MappingFragmentLogic(
                     }
                 }
             }
-            if (minLineDist < minD && minLineDist <= 40f) {
-                return null
+
+            // SMART SELECTION LOGIC
+            
+            // Case 1: Point is a solid/direct hit (within 25dp)
+            // We ALWAYS prefer the point, UNLESS the line is substantially closer.
+            // Example: tap is 24dp from point, but 2dp from line -> pick line.
+            if (minD <= 25f * density) {
+                if (minLineDist <= 10f * density && minD > minLineDist + 10f * density) {
+                    return null // User definitively hit the line, let line overlay handle it
+                }
+                return best
+            }
+
+            // Case 2: Point is a sloppy hit (between 25dp and 35dp)
+            // We pick the point only if the line isn't closer.
+            if (minD <= pointTol) {
+                if (minLineDist < minD) {
+                    return null // Line is closer, let line overlay handle it
+                }
+                return best
             }
         }
 
-        return best
+        return null
     }
 
 

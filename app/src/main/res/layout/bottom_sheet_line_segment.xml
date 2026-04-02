@@ -104,10 +104,11 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/ll_code_id_container" />
 
-        <androidx.constraintlayout.widget.ConstraintLayout
+        <LinearLayout
             android:id="@+id/cl_line_menu"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:layout_marginStart="@dimen/_10sdp"
             android:layout_marginBottom="@dimen/_10sdp"
             android:background="@drawable/bg_btn_square"
@@ -126,10 +127,7 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/_15sdp"
-                android:paddingVertical="@dimen/_10sdp"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="parent">
+                android:paddingVertical="@dimen/_10sdp">
 
                 <ImageView
                     android:id="@+id/iv_edit"
@@ -159,10 +157,7 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/_15sdp"
-                android:paddingVertical="@dimen/_10sdp"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/ll_edit">
+                android:paddingVertical="@dimen/_10sdp">
 
                 <ImageView
                     android:id="@+id/iv_continue_collect"
@@ -182,7 +177,7 @@
 
             </LinearLayout>
 
-        </androidx.constraintlayout.widget.ConstraintLayout>
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/ll_button_container"

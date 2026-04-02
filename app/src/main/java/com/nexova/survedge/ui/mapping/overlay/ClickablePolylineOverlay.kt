@@ -145,7 +145,9 @@ class ClickablePolylineOverlay(
     
     override fun onSingleTapConfirmed(e: android.view.MotionEvent?, mapView: MapView?): Boolean {
         if (e != null && mapView != null) {
-            if (isPointNearPolyline(mapView, e.x, e.y)) {
+            val density = mapView.context.resources.displayMetrics.density
+            val toleranceParams = 25f * density
+            if (isPointNearPolyline(mapView, e.x, e.y, toleranceParams)) {
                 onPolylineClick?.invoke()
                 return true
             }
