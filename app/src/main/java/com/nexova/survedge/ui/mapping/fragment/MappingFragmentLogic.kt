@@ -142,6 +142,9 @@ class MappingFragmentLogic(
 
         // 1. Handle Outgoing View
         outgoing?.let { view ->
+            if (getBindingRootForType(currentActiveSheet) == view) {
+                currentActiveSheet = SheetType.NONE
+            }
             view.animate().cancel() // Stop any ongoing animation
             val animator = view.animate().setDuration(duration).setInterpolator(interpolator)
             when (transition) {
@@ -4310,24 +4313,30 @@ class MappingFragmentLogic(
         (fragment.activity as? MainActivity)?.setNavHiddenState(false)
 
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.let { nav ->
-            if (nav.visibility != View.VISIBLE) {
-                nav.animate().cancel()
-                nav.visibility = View.VISIBLE
-                nav.translationY = 0f
+            nav.animate().cancel()
+            nav.visibility = View.VISIBLE
+            nav.translationY = 0f
 
-                fragment.binding.btnCollect.animate().cancel()
-                fragment.binding.btnCollect.translationY = -bottomNavOffset
+            fragment.binding.btnCollect.animate().cancel()
+            fragment.binding.btnCollect.translationY = -bottomNavOffset
 
-                fragment.binding.llMapsButtons.animate().cancel()
-                fragment.binding.llMapsButtons.translationY = 0f
+            fragment.binding.llMapsButtons.animate().cancel()
+            fragment.binding.llMapsButtons.translationY = 0f
 
-                // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin
-                if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
-                    fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                        bottomMargin = bottomNavOffset.toInt()
-                    }
+            // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin
+            if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
+                fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                    bottomMargin = bottomNavOffset.toInt()
                 }
             }
+
+            nav.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(200)
+                .withEndAction {
+                    fragment.binding.btnCollect.translationY = -bottomNavOffset
+                }.start()
         }
     }
 
