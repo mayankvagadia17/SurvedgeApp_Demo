@@ -111,9 +111,7 @@
             android:layout_marginStart="@dimen/_10sdp"
             android:layout_marginBottom="@dimen/_10sdp"
             android:background="@drawable/bg_btn_square"
-            android:elevation="@dimen/_4sdp"
-            android:paddingHorizontal="@dimen/_10sdp"
-            android:paddingVertical="@dimen/_5sdp"
+            android:elevation="@dimen/_12sdp"
             android:visibility="gone"
             app:layout_constraintBottom_toTopOf="@id/ll_button_container"
             app:layout_constraintStart_toStartOf="parent">
@@ -127,9 +125,10 @@
                 android:focusable="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="@dimen/_10sdp"
-                android:paddingVertical="@dimen/_8sdp"
+                android:paddingHorizontal="@dimen/_15sdp"
+                android:paddingVertical="@dimen/_10sdp"
                 app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="parent">
 
                 <ImageView
@@ -141,10 +140,9 @@
 
                 <TextView
                     android:id="@+id/tv_edit"
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="@dimen/_10sdp"
-                    android:layout_weight="1"
                     android:text="Edit"
                     android:textColor="@color/text_primary"
                     android:textSize="@dimen/_12ssp" />
@@ -160,8 +158,8 @@
                 android:focusable="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="@dimen/_10sdp"
-                android:paddingVertical="@dimen/_8sdp"
+                android:paddingHorizontal="@dimen/_15sdp"
+                android:paddingVertical="@dimen/_10sdp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/ll_edit">
@@ -175,10 +173,9 @@
 
                 <TextView
                     android:id="@+id/tv_continue_collect"
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="@dimen/_10sdp"
-                    android:layout_weight="1"
                     android:text="Continue collect"
                     android:textColor="@color/text_primary"
                     android:textSize="@dimen/_12ssp" />
@@ -208,14 +205,14 @@
                 app:tint="@color/text_primary" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_stackout"
+                android:id="@+id/btn_stakeout"
                 android:layout_width="0dp"
                 android:layout_height="@dimen/_42sdp"
                 android:layout_marginStart="@dimen/_10sdp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_button_save"
                 android:fontFamily="@font/manrope_semibold"
-                android:text="Stackout"
+                android:text="Stakeout"
                 android:textAllCaps="false"
                 android:textColor="@color/white"
                 android:textSize="@dimen/_14ssp"

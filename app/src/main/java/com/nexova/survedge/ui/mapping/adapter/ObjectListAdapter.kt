@@ -20,11 +20,12 @@ data class ObjectListItem(
 )
 
 class ObjectListAdapter(
-    private var objects: List<ObjectListItem>,
+    private var objects: MutableList<ObjectListItem>,
     private val isOrderable: Boolean = false,
     private val onDelete: (ObjectListItem) -> Unit = {},
     private val onItemClick: (ObjectListItem) -> Unit = {},
-    private val onArrowClick: (ObjectListItem) -> Unit = {}
+    private val onArrowClick: (ObjectListItem) -> Unit = {},
+    private val onDragStart: (RecyclerView.ViewHolder) -> Unit = {}
 ) : RecyclerView.Adapter<ObjectListAdapter.ObjectViewHolder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ObjectViewHolder {
@@ -36,7 +37,7 @@ class ObjectListAdapter(
 
     override fun onBindViewHolder(holder: ObjectViewHolder, position: Int) {
         val item = objects[position]
-        holder.bind(item, isOrderable, onDelete, onItemClick)
+        holder.bind(item, isOrderable, onDelete, onItemClick, onDragStart)
         
         val clickTarget = holder.mainItemLayout ?: holder.itemView
         clickTarget.setOnClickListener { onItemClick(item) }
@@ -55,8 +56,21 @@ class ObjectListAdapter(
     override fun getItemCount(): Int = objects.size
     
     fun updateItems(newItems: List<ObjectListItem>) {
-        this.objects = newItems
+        if (this.objects !== newItems) {
+            this.objects.clear()
+            this.objects.addAll(newItems)
+        }
         notifyDataSetChanged()
+    }
+
+    fun moveItem(fromPosition: Int, toPosition: Int) {
+        if (fromPosition !in objects.indices || toPosition !in objects.indices || fromPosition == toPosition) {
+            return
+        }
+
+        val movedItem = objects.removeAt(fromPosition)
+        objects.add(toPosition, movedItem)
+        notifyItemMoved(fromPosition, toPosition)
     }
 
     class ObjectViewHolder(itemView: View, private val isOrderable: Boolean) : RecyclerView.ViewHolder(itemView) {
@@ -78,7 +92,8 @@ class ObjectListAdapter(
             item: ObjectListItem,
             isOrderable: Boolean,
             onDelete: (ObjectListItem) -> Unit,
-            onItemClick: (ObjectListItem) -> Unit
+            onItemClick: (ObjectListItem) -> Unit,
+            onDragStart: (RecyclerView.ViewHolder) -> Unit = {}
         ) {
             val displayName = item.id.ifEmpty { item.codeId.ifEmpty { "No code" } }
             
@@ -86,6 +101,19 @@ class ObjectListAdapter(
                 // Binding for item_edit_point
                 pointIdText?.text = displayName
                 removeView?.setOnClickListener { onDelete(item) }
+                
+                dragHandleView?.setOnLongClickListener {
+                    onDragStart(this)
+                    true
+                }
+                
+                // Add short click to handle to allow startDrag immediately if desired by the ItemTouchHelper
+                dragHandleView?.setOnTouchListener { _, event ->
+                    if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                        onDragStart(this)
+                    }
+                    false
+                }
             } else {
                 // Binding for item_object_list
                 nameText?.text = displayName
@@ -118,7 +146,7 @@ class ObjectListAdapter(
                         if (item.isExpanded && item.nestedPoints != null) {
                             rvNestedPoints?.visibility = View.VISIBLE
                             rvNestedPoints?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(itemView.context)
-                            rvNestedPoints?.adapter = ObjectListAdapter(item.nestedPoints!!, onItemClick = onItemClick)
+                            rvNestedPoints?.adapter = ObjectListAdapter(item.nestedPoints!!.toMutableList(), onItemClick = onItemClick)
                         } else {
                             rvNestedPoints?.visibility = View.GONE
                         }

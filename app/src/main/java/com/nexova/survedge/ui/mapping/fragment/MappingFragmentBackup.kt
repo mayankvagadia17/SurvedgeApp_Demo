@@ -1136,7 +1136,7 @@ class MappingFragmentBackup : Fragment() {
         sheetBinding.tvCodeId.setOnClickListener { hideMenuIfVisible() }
         sheetBinding.tvSegmentInfo.setOnClickListener { hideMenuIfVisible() }
         sheetBinding.viewTypeDot.setOnClickListener { hideMenuIfVisible() }
-        sheetBinding.btnStackout.setOnClickListener { hideMenuIfVisible() }
+        sheetBinding.btnStakeout.setOnClickListener { hideMenuIfVisible() }
         // Don't set click listener on llButtonContainer as it contains the menu button
         // and might interfere with menu button clicks
 
@@ -1328,7 +1328,7 @@ class MappingFragmentBackup : Fragment() {
 
         val objectListItems = processCollectedPointsForObjectList()
 
-        val adapter = ObjectListAdapter(objectListItems) { item ->
+        val adapter = ObjectListAdapter(objectListItems.toMutableList(), onItemClick = { item ->
             val editingLine = if (isSelectingPointForEditLine) pendingEditLineSegment else null
 
             if (isSelectingPointForEditLine && editingLine != null && item.indicatorType == IndicatorType.POINT) {
@@ -1380,7 +1380,7 @@ class MappingFragmentBackup : Fragment() {
                     }
                 }
             }
-        }
+        })
         objectListBinding.rvObjectList.layoutManager = LinearLayoutManager(requireContext())
         objectListBinding.rvObjectList.adapter = adapter
 
@@ -1397,7 +1397,7 @@ class MappingFragmentBackup : Fragment() {
                                 it.codeId.contains(query, ignoreCase = true)
                     }
                 }
-                objectListBinding.rvObjectList.adapter = ObjectListAdapter(filteredItems) { item ->
+                objectListBinding.rvObjectList.adapter = ObjectListAdapter(filteredItems.toMutableList(), onItemClick = { item ->
                     hideObjectListBottomSheet()
 
                     when (item.indicatorType) {
@@ -1423,7 +1423,7 @@ class MappingFragmentBackup : Fragment() {
                             }
                         }
                     }
-                }
+                })
             }
         })
 

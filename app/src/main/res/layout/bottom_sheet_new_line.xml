@@ -1,10 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_bottom_sheet"
-    android:paddingBottom="@dimen/_40sdp">
+    android:clickable="true"
+    android:focusable="true">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/ll_main_content"
@@ -49,7 +49,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="New line"
+                android:text="New Line"
                 android:textColor="@color/code_header_text"
                 android:textSize="@dimen/_12ssp"
                 android:textStyle="bold" />
@@ -167,7 +167,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Closed Line"
-                android:textColor="@color/neutral_dark"
+                android:textColor="@color/text_primary"
                 android:textSize="@dimen/_10ssp"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
@@ -178,7 +178,6 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/_20sdp"
-                android:enabled="false"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="parent" />
@@ -244,25 +243,38 @@
             android:textSize="@dimen/_12ssp"
             app:layout_constraintTop_toBottomOf="@id/ll_points_header" />
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rv_points"
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/nsv_points_container"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="@dimen/_10sdp"
-            android:nestedScrollingEnabled="false"
-            android:paddingHorizontal="@dimen/_15sdp"
-            android:visibility="gone"
-            app:layout_constraintBottom_toTopOf="@id/btn_save_line"
+            android:layout_marginTop="@dimen/_5sdp"
+            android:clipToPadding="false"
+            android:clipChildren="false"
+            app:layout_constrainedHeight="true"
             app:layout_constraintHeight_default="wrap"
-            app:layout_constraintHeight_max="@dimen/_150sdp"
-            app:layout_constraintTop_toBottomOf="@id/ll_points_header" />
+            app:layout_constraintHeight_max="@dimen/_300sdp"
+            app:layout_constraintBottom_toTopOf="@id/btn_save_line"
+            app:layout_constraintTop_toBottomOf="@id/ll_points_header">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_points"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:nestedScrollingEnabled="false"
+                android:paddingHorizontal="@dimen/_15sdp"
+                android:visibility="gone" />
+
+        </androidx.core.widget.NestedScrollView>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_save_line"
             android:layout_width="match_parent"
             android:layout_height="@dimen/_42sdp"
             android:layout_marginHorizontal="@dimen/_15sdp"
-            android:layout_marginTop="@dimen/_20sdp"
+            android:layout_marginTop="@dimen/_10sdp"
+            android:layout_marginBottom="@dimen/_40sdp"
             android:background="@drawable/bg_button_save"
             android:enabled="false"
             android:fontFamily="@font/manrope_semibold"
@@ -273,7 +285,8 @@
             android:textStyle="bold"
             app:backgroundTint="@null"
             app:cornerRadius="@dimen/_12sdp"
-            app:layout_constraintTop_toBottomOf="@id/rv_points" />
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/nsv_points_container" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
