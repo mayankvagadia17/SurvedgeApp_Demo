@@ -2077,9 +2077,10 @@ class MappingFragmentLogic(
             sheetBinding.llContinueCollect.visibility =
                 if (lineSegment.isClosed) View.GONE else View.VISIBLE
             
-            // ENSURE Edit button is visible and active in the dropdown
+            // ENSURE Edit button and Menu button are visible and active for Lines
             sheetBinding.llEdit.visibility = View.VISIBLE
-            
+            sheetBinding.btnMenu.visibility = View.VISIBLE
+
             setupBottomSheetClickToHideMenu(sheetBinding.root, sheetBinding)
             setupSwipeGestureForPointLineSelection(sheetBinding.root, sheetBinding)
 
@@ -2266,21 +2267,19 @@ class MappingFragmentLogic(
                     }
                 }
                 sheetBinding.llContinueCollect.visibility = View.GONE // Selection from point doesn't support continue yet
-                sheetBinding.llEdit.visibility = if (isLine) View.VISIBLE else View.GONE
+                
+                // Only individual standalone points can be editable
+                sheetBinding.llEdit.visibility = if (!isLine) View.VISIBLE else View.GONE
                 sheetBinding.llEdit.setOnClickListener {
                     sheetBinding.clLineMenu.visibility = View.GONE
-                    val codeId = point.codeId
-                    val lineOverlay = fragment.completedLineOverlays
-                        .filterIsInstance<ClickablePolylineOverlay>()
-                        .find { it.codeId == codeId }
-
-                    if (lineOverlay != null) {
+                    if (!isLine) {
                         hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
-                        showEditLineBottomSheet(lineOverlay)
+                        showEditPointBottomSheet(point)
                     }
                 }
 
-                sheetBinding.btnMenu.visibility = if (isLine) View.VISIBLE else View.GONE
+                // Hide the menu entirely if it's a line point (since it has no edit options)
+                sheetBinding.btnMenu.visibility = if (!isLine) View.VISIBLE else View.GONE
 
                 setupBottomSheetClickToHideMenu(sheetBinding.root, sheetBinding)
                 setupSwipeGestureForPointLineSelection(sheetBinding.root, sheetBinding)
