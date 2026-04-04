@@ -1,0 +1,91 @@
+[
+  {
+    "session": 20,
+    "date": "2026-04-04",
+    "focus": "fix: bottom sheet navigation sequencing",
+    "files": ["app/src/main/java/com/nexova/survedge/ui/mapping/fragment/MappingFragmentLogic.kt", "docs/ui/mapping/fragment/readme.md"],
+    "summary": "Fixed visual overlap between bottom sheets and navigation tabs by ensuring nav hides before sheet shows"
+  },
+  {
+    "session": 19,
+    "date": "2026-04-04",
+    "focus": "index-drift + changelog: Final sync",
+    "files": ["docs/index.md", "docs/docMaintenance/changelog.json", "docs/docMaintenance/changelog.md", "docs/docMaintenance/documentationProgress.md"],
+    "summary": "Final documentation sync — all 19 sessions complete"
+  },
+  {
+    "session": 18,
+    "date": "2026-04-04",
+    "focus": "docs/utils",
+    "files": ["docs/utils/readme.md", "docs/utils/aiContext.md"],
+    "summary": "Documented CSVExporter and JSONImporter with file format specs"
+  },
+  {
+    "session": 17,
+    "date": "2026-04-04",
+    "focus": "docs/ui/stakeout",
+    "files": ["docs/ui/stakeout/readme.md", "docs/ui/stakeout/aiContext.md"],
+    "summary": "Documented stakeout models, utility functions, and domain terminology"
+  },
+  {
+    "session": 16,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping/maplibre + mapper + drawable",
+    "files": ["docs/ui/mapping/maplibre/readme.md", "docs/ui/mapping/mapper/readme.md", "docs/ui/mapping/drawable/readme.md"],
+    "summary": "Documented marker/polyline helpers, point mappers, and custom pin drawable"
+  },
+  {
+    "session": 15,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping/adapter",
+    "files": ["docs/ui/mapping/adapter/readme.md"],
+    "summary": "Documented CodeAdapter, EditPointAdapter, and ObjectListAdapter"
+  },
+  {
+    "session": 14,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping/overlay",
+    "files": ["docs/ui/mapping/overlay/readme.md"],
+    "summary": "Documented all 7 OSMDroid custom overlay classes"
+  },
+  {
+    "session": 13,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping/viewmodel",
+    "files": ["docs/ui/mapping/viewmodel/readme.md"],
+    "summary": "Documented MappingViewModel.kt state and operations"
+  },
+  {
+    "session": 12,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping/fragment",
+    "files": ["docs/ui/mapping/fragment/readme.md"],
+    "summary": "Documented Fragment/Helper/Logic split for Mapping screen"
+  },
+  {
+    "session": 11,
+    "date": "2026-04-04",
+    "focus": "docs/ui/mapping (overview)",
+    "files": ["docs/ui/mapping/readme.md", "docs/ui/mapping/aiContext.md"],
+    "summary": "Created Mapping section overview and domain terminology"
+  },
+  {
+    "session": 10,
+    "date": "2026-04-04",
+    "focus": "docs/ui/project",
+    "files": ["docs/ui/project/readme.md", "docs/ui/project/aiContext.md"],
+    "summary": "Documented full project management feature set"
+  },
+  {
+    "session": 9,
+    "date": "2026-04-04",
+    "focus": "docs/ui/main + splash + device + custom",
+    "files": [
+      "docs/ui/main/readme.md",
+      "docs/ui/splash/readme.md",
+      "docs/ui/device/readme.md",
+      "docs/ui/custom/readme.md"
+    ],
+    "summary": "Documented MainActivity, SplashActivity, DeviceFragment, and SnappingHorizontalScrollView"
+  }
+]
