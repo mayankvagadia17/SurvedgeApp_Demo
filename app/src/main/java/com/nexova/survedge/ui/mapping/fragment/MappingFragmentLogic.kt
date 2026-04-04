@@ -1021,7 +1021,7 @@ class MappingFragmentLogic(
         pushBackStack(SheetType.NEW_LINE) {
             showNewLineBottomSheet(BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
         }
-        showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = false)
+        showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = true, sheetTitle = "Select Point")
     }
 
     fun hideNewLineBottomSheet(
@@ -2359,7 +2359,8 @@ class MappingFragmentLogic(
     fun showObjectListBottomSheet(
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         showAddButton: Boolean = true,
-        showTitle: Boolean = true
+        showTitle: Boolean = true,
+        sheetTitle: String = "Object list"
     ) = hideMenu {
         val sheetBinding = fragment.binding.bottomSheetObjectList
         showSheet(SheetType.OBJECT_LIST, transition) {
@@ -2375,6 +2376,7 @@ class MappingFragmentLogic(
             sheetBinding.btnAddObject.visibility = if (showAddButton) View.VISIBLE else View.INVISIBLE
             sheetBinding.btnAddObject.alpha = if (showAddButton) 1f else 0f
 
+            sheetBinding.tvSheetTitle.text = sheetTitle
             sheetBinding.tvSheetTitle.visibility = if (showTitle) View.VISIBLE else View.INVISIBLE
 
             sheetBinding.cvAddOptions.visibility = View.GONE
