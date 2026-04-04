@@ -1044,6 +1044,8 @@ class MappingFragmentLogic(
     fun showObjectListBottomSheetInternalForNewLine(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
         pushBackStack(SheetType.NEW_LINE) {
             showNewLineBottomSheet(BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
+            // Update UI after showing in case points were added
+            updateNewLineUI()
         }
         showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = true, sheetTitle = "Select Point")
     }
@@ -1174,8 +1176,8 @@ class MappingFragmentLogic(
     }
 
     fun addPointToNewLine(point: LabeledPoint) {
-        // Robust check: State flag OR UI visibility
-        if (!fragment.isCreatingNewLine && fragment.binding.bottomSheetNewLine.root.visibility != View.VISIBLE) return
+        // Robust check: Allow if either creating new line OR sheet is visible
+        if (!fragment.isCreatingNewLine) return
 
         // Prevent adding the same point multiple times
         if (fragment.newLinePoints.any { it.id == point.id }) {
@@ -2455,12 +2457,14 @@ class MappingFragmentLogic(
             }
             val handleItemAction = { item: ObjectListItem ->
                 if (fragment.isCreatingNewLine && item.indicatorType == IndicatorType.POINT) {
-                    hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT) {
-                        val point = fragment.collectedLabeledPoints.find { it.id == item.id }
-                        if (point != null) {
-                            addPointToNewLine(point)
-                            fragment.binding.bottomSheetNewLine.root.visibility = View.VISIBLE
-                        }
+                    val pointToAdd = fragment.collectedLabeledPoints.find { it.id == item.id }
+                    if (pointToAdd != null) {
+                        // Add point first
+                        addPointToNewLine(pointToAdd)
+                        // Update overlay visualization
+                        updateNewLineOverlay()
+                        // Then hide object list, which will trigger popSheet to restore New Line sheet
+                        hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
                     }
                 } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
                     val point = fragment.collectedLabeledPoints.find { it.id == item.id }
