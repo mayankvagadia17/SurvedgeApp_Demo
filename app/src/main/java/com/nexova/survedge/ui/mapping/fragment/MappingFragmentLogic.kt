@@ -3267,6 +3267,10 @@ class MappingFragmentLogic(
         onCodeSelected: (String, IndicatorType) -> Unit
     ) = hideMenu {
         val sheetBinding = fragment.binding.bottomSheetSelectCode
+
+        // Store the current active sheet so we can return to it
+        val previousSheet = currentActiveSheet
+
         showSheet(SheetType.SELECT_CODE, transition) {
         // Avoid right-slide animation when the sheet itself slides up
         sheetBinding.vfCodeManager.inAnimation = null
@@ -3298,7 +3302,7 @@ class MappingFragmentLogic(
                     code.abbreviation
                 }
                 onCodeSelected(finalId, code.indicatorType)
-                hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose)
+                hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose, previousSheet = previousSheet)
             }
             sheetBinding.rvCodes.layoutManager = LinearLayoutManager(fragment.requireContext())
             sheetBinding.rvCodes.adapter = adapter
@@ -3328,7 +3332,7 @@ class MappingFragmentLogic(
                 }
             }
             sheetBinding.etSearch.addTextChangedListener(selectCodeSearchWatcher)
-            sheetBinding.btnClose.setOnClickListener { hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose) }
+            sheetBinding.btnClose.setOnClickListener { hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose, previousSheet = previousSheet) }
 
             // Add Code view setup (Child 1 of vfCodeManager)
                 sheetBinding.btnAddCode.setOnClickListener {
@@ -3383,7 +3387,7 @@ class MappingFragmentLogic(
 
                 sheetBinding.btnCloseAddCode.setOnClickListener {
                     hideKeyboard(sheetBinding.root)
-                    hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose)
+                    hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose, previousSheet = previousSheet)
                 }
 
                 sheetBinding.vfCodeManager.setInAnimation(fragment.requireContext(), R.anim.slide_in_right)
@@ -3391,7 +3395,7 @@ class MappingFragmentLogic(
                 sheetBinding.vfCodeManager.showNext()
             }
 
-            setupSwipeToDismiss(sheetBinding.root) { hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose) }
+            setupSwipeToDismiss(sheetBinding.root) { hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose, previousSheet = previousSheet) }
             }
         }
     }
@@ -3399,7 +3403,8 @@ class MappingFragmentLogic(
     fun hideSelectCodeBottomSheet(
         showNav: Boolean = true,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN,
-        onHidden: (() -> Unit)? = null
+        onHidden: (() -> Unit)? = null,
+        previousSheet: SheetType? = null
     ) {
         // Re-enable map touch and show map buttons
         fragment.binding.mapView.setMultiTouchControls(true)
@@ -3420,7 +3425,15 @@ class MappingFragmentLogic(
             }
         }
 
-        popSheet(transition, afterAnimation)
+        // If we know which sheet was active before, restore it instead of closing all
+        if (previousSheet != null && previousSheet != SheetType.NONE) {
+            val outgoingView = getBindingRootForType(SheetType.SELECT_CODE)
+            val incomingView = getBindingRootForType(previousSheet)
+            currentActiveSheet = previousSheet
+            animateSheetTransition(outgoingView, incomingView, transition, afterAnimation)
+        } else {
+            popSheet(transition, afterAnimation)
+        }
     }
 
 
