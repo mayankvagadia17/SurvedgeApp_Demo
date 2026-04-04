@@ -1018,7 +1018,10 @@ class MappingFragmentLogic(
     }
 
     fun showObjectListBottomSheetInternalForNewLine(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
-        showObjectListBottomSheet(transition = transition, showAddButton = false)
+        pushBackStack(SheetType.NEW_LINE) {
+            showNewLineBottomSheet(BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
+        }
+        showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = false)
     }
 
     fun hideNewLineBottomSheet(
@@ -1065,6 +1068,7 @@ class MappingFragmentLogic(
 
         if (showNav) {
             restoreStateAfterClosingInfoSheet()
+            showBottomNavigation(force = true)
         }
         onHidden?.invoke()
     }
@@ -2325,7 +2329,8 @@ class MappingFragmentLogic(
 
     fun showObjectListBottomSheet(
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
-        showAddButton: Boolean = true
+        showAddButton: Boolean = true,
+        showTitle: Boolean = true
     ) = hideMenu {
         val sheetBinding = fragment.binding.bottomSheetObjectList
         showSheet(SheetType.OBJECT_LIST, transition) {
@@ -2340,6 +2345,8 @@ class MappingFragmentLogic(
             // Control Add button visibility based on context
             sheetBinding.btnAddObject.visibility = if (showAddButton) View.VISIBLE else View.INVISIBLE
             sheetBinding.btnAddObject.alpha = if (showAddButton) 1f else 0f
+
+            sheetBinding.tvSheetTitle.visibility = if (showTitle) View.VISIBLE else View.INVISIBLE
 
             sheetBinding.cvAddOptions.visibility = View.GONE
             sheetBinding.viewOutsideTouch.visibility = View.GONE
@@ -2373,7 +2380,7 @@ class MappingFragmentLogic(
             sheetBinding.llOptionLine.setOnClickListener {
                 sheetBinding.cvAddOptions.visibility = View.GONE
                 sheetBinding.viewOutsideTouch.visibility = View.GONE
-                hideObjectListBottomSheet(showNav = false) {
+                hideObjectListBottomSheet(showNav = true) {
                     toggleNewLineMode()
                 }
             }
@@ -2389,10 +2396,12 @@ class MappingFragmentLogic(
             }
             val handleItemAction = { item: ObjectListItem ->
                 if (fragment.isCreatingNewLine && item.indicatorType == IndicatorType.POINT) {
-                    hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
-                    val point = fragment.collectedLabeledPoints.find { it.id == item.id }
-                    if (point != null) {
-                        addPointToNewLine(point)
+                    hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT) {
+                        val point = fragment.collectedLabeledPoints.find { it.id == item.id }
+                        if (point != null) {
+                            addPointToNewLine(point)
+                            fragment.binding.bottomSheetNewLine.root.visibility = View.VISIBLE
+                        }
                     }
                 } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
                     val point = fragment.collectedLabeledPoints.find { it.id == item.id }
@@ -2545,7 +2554,7 @@ class MappingFragmentLogic(
         adjustMapsButtonsForBottomSheet(closingView = sheetBinding.root)
 
         popSheet(transition)
-        if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE) {
+        if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE && fragment.binding.bottomSheetNewLine.root.visibility != View.VISIBLE) {
             restoreStateAfterClosingInfoSheet()
         }
         // If edit line is open underneath, refresh its list/counts after closing object list

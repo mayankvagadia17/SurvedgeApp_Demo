@@ -38,6 +38,7 @@
                 app:tint="@null" />
 
             <TextView
+                android:id="@+id/tv_sheet_title"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
