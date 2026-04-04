@@ -118,7 +118,7 @@ class MappingFragmentLogic(
     }
 
     private val sheetNavigationStack = ArrayDeque<Pair<SheetType, () -> Unit>>()
-    private var currentActiveSheet = SheetType.NONE
+    var currentActiveSheet = SheetType.NONE
 
     enum class BottomSheetTransition {
         SLIDE_UP,
@@ -286,7 +286,7 @@ class MappingFragmentLogic(
         animateSheetTransition(outgoingView, null, transition, onEnd)
     }
 
-    private fun getBindingRootForType(type: SheetType): View? = when (type) {
+    fun getBindingRootForType(type: SheetType): View? = when (type) {
         SheetType.COLLECT_POINT -> fragment.binding.bottomSheetCollectPoint.root
         SheetType.LINE_SEGMENT -> fragment.binding.bottomSheetLineSegment.root
         SheetType.EDIT_LINE -> fragment.binding.bottomSheetEditLine.root

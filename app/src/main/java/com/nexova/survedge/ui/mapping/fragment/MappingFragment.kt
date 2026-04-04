@@ -117,6 +117,7 @@ class MappingFragment : Fragment() {
     internal var bullseyeOverlay: BullseyeOverlay? = null
     internal var isInBullseyeMode: Boolean = false
     internal var autoFollowHandler: Handler? = null
+    internal var previousStakeoutSheet: MappingFragmentLogic.SheetType? = null
     internal var currentCoordinateSystem: CoordinateSystem = CoordinateSystem.LOCAL // Default to Local based on previous "m E" texts
 
     override fun onCreateView(

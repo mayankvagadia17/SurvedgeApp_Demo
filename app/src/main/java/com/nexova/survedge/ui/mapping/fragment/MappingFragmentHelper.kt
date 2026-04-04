@@ -103,7 +103,7 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
 
         sheet.btnCloseStakeout.setOnClickListener {
             fragment.logic.stopStakeoutSession()
-            hideStakeoutUI()
+            hideStakeoutUI(previousSheet = fragment.previousStakeoutSheet)
         }
 
         // Initialize Page Widths and Scroll Listener
@@ -145,21 +145,28 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
     fun showStakeoutUI() = fragment.logic.hideMenu {
         fragment.logic.hideBottomNavigation {
             val root = fragment.binding.stakeoutBottomSheet.root
+
+            // Store the current active sheet so we can return to it
+            fragment.previousStakeoutSheet = fragment.logic.currentActiveSheet
+
             root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
             root.requestLayout()
             root.visibility = View.VISIBLE
             // Hide the main Collect FAB to prevent overlap and interaction
             fragment.binding.btnCollect.visibility = View.GONE
-            
+
             fragment.logic.animateSheetTransition(null, root, MappingFragmentLogic.BottomSheetTransition.SLIDE_UP)
             fragment.logic.adjustMapsButtonsForBottomSheet(root.height)
-            
+
+            // Update current active sheet
+            fragment.logic.currentActiveSheet = MappingFragmentLogic.SheetType.STAKEOUT
+
             // Draw connection line immediately after UI is ready
             drawInitialConnectionLine()
-            
+
             fragment.logic.setupSwipeToDismiss(root) {
                 fragment.logic.stopStakeoutSession()
-                hideStakeoutUI()
+                hideStakeoutUI(previousSheet = fragment.previousStakeoutSheet)
             }
         }
     }
@@ -202,9 +209,10 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         }
     }
 
-    fun hideStakeoutUI(showNav: Boolean = true, onHidden: (() -> Unit)? = null) {
+    fun hideStakeoutUI(showNav: Boolean = true, onHidden: (() -> Unit)? = null, previousSheet: MappingFragmentLogic.SheetType? = null) {
         val root = fragment.binding.stakeoutBottomSheet.root
-        fragment.logic.animateSheetTransition(root, null, MappingFragmentLogic.BottomSheetTransition.SLIDE_DOWN) {
+
+        val afterAnimation: () -> Unit = {
             onHidden?.invoke()
             fragment.logic.adjustMapsButtonsForBottomSheet()
             // Restore the main Collect FAB
@@ -223,6 +231,15 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
                 clearStakeoutMarkers()
                 if (fragment.isInBullseyeMode) hideBullseyeView()
             }
+        }
+
+        // If we know which sheet was active before, restore it instead of closing all
+        if (previousSheet != null && previousSheet != MappingFragmentLogic.SheetType.NONE) {
+            val incomingView = fragment.logic.getBindingRootForType(previousSheet)
+            fragment.logic.currentActiveSheet = previousSheet
+            fragment.logic.animateSheetTransition(root, incomingView, MappingFragmentLogic.BottomSheetTransition.SLIDE_DOWN, afterAnimation)
+        } else {
+            fragment.logic.animateSheetTransition(root, null, MappingFragmentLogic.BottomSheetTransition.SLIDE_DOWN, afterAnimation)
         }
     }
 
