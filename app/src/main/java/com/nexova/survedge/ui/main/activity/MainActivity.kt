@@ -24,8 +24,6 @@ class MainActivity : BaseActivity(), ProjectNavigationListener {
     private var mappingFragment: MappingFragment? = null
     private var activeFragment: Fragment? = null
 
-    private var isNavHiddenByFragment = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -42,23 +40,12 @@ class MainActivity : BaseActivity(), ProjectNavigationListener {
 
             if (isImeVisible) {
                 binding.bottomNavigationView.visibility = View.GONE
-                // When keyboard is open, apply IME bottom inset as padding to root
                 v.setPadding(systemBars.left, 0, systemBars.right, ime.bottom)
             } else {
-                // Only show BNV if the fragment hasn't requested it to be hidden
-                if (!isNavHiddenByFragment) {
-                    binding.bottomNavigationView.visibility = View.VISIBLE
-                    binding.bottomNavigationView.translationY = 0f // Ensure it's not hidden by animation
-                    // When keyboard is closed, apply systemBars bottom (navigation bar) as padding to BNV
-                    binding.bottomNavigationView.setPadding(0, 0, 0, systemBars.bottom)
-                    // Reset root padding (or handle regular inset)
-                    v.setPadding(systemBars.left, 0, systemBars.right, 0)
-                } else {
-                    // Fragment wants it hidden (e.g. Bottom Sheet is open)
-                    binding.bottomNavigationView.visibility = View.GONE
-                    // Reset root padding to 0 (remove IME space)
-                    v.setPadding(systemBars.left, 0, systemBars.right, 0)
-                }
+                binding.bottomNavigationView.visibility = View.VISIBLE
+                binding.bottomNavigationView.translationY = 0f
+                binding.bottomNavigationView.setPadding(0, 0, 0, systemBars.bottom)
+                v.setPadding(systemBars.left, 0, systemBars.right, 0)
             }
             insets
         }
@@ -166,19 +153,5 @@ class MainActivity : BaseActivity(), ProjectNavigationListener {
             commit()
         }
         // activeFragment = createProjectFragment // Don't track as main tab fragment, it's transient
-    }
-    
-    fun hideBottomNavigation() {
-        isNavHiddenByFragment = true
-        binding.bottomNavigationView.visibility = View.GONE
-    }
-    
-    fun showBottomNavigation() {
-        isNavHiddenByFragment = false
-        binding.bottomNavigationView.visibility = View.VISIBLE
-    }
-
-    fun setNavHiddenState(hidden: Boolean) {
-        isNavHiddenByFragment = hidden
     }
 }

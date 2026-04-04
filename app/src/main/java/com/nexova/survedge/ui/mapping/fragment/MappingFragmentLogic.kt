@@ -140,6 +140,27 @@ class MappingFragmentLogic(
         val screenHeight = fragment.resources.displayMetrics.heightPixels.toFloat()
         val interpolator = FastOutSlowInInterpolator()
 
+        // Manage bottom navigation based on sheet type
+        if (incoming != null) {
+            // Hide navigation for most sheets, except LINE_SEGMENT (point/line details)
+            if (currentActiveSheet != SheetType.LINE_SEGMENT) {
+                (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                    animate().cancel()
+                    visibility = View.GONE
+                    alpha = 1f
+                    translationY = 0f
+                }
+            }
+        } else if (outgoing != null) {
+            // Show navigation when sheet closes
+            (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                animate().cancel()
+                visibility = View.VISIBLE
+                alpha = 1f
+                translationY = 0f
+            }
+        }
+
         // 1. Handle Outgoing View
         outgoing?.let { view ->
             if (getBindingRootForType(currentActiveSheet) == view) {
@@ -225,7 +246,7 @@ class MappingFragmentLogic(
         // Instead of pushing here, we expect the CALLEE to have pushed the PREVIOUS state if needed,
         // OR we can capture it here if we had a way to know the current restoration.
         // Actually, let's have showSheet handle the push of the CURRENT state before it's replaced.
-        
+
         currentActiveSheet = type
         val outgoingView = getBindingRootForType(outgoing)
         val incomingView = getBindingRootForType(type)
@@ -244,9 +265,9 @@ class MappingFragmentLogic(
         sheetNavigationStack.addLast(type to restoration)
     }
 
-    fun popSheet(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN) {
+    fun popSheet(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN, onEnd: (() -> Unit)? = null) {
         if (sheetNavigationStack.isEmpty()) {
-            hideAllSheets(transition)
+            hideAllSheets(transition, onEnd)
             return
         }
         val (type, restoration) = sheetNavigationStack.removeLast()
@@ -258,11 +279,11 @@ class MappingFragmentLogic(
         sheetNavigationStack.clear()
     }
 
-    fun hideAllSheets(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN) {
+    fun hideAllSheets(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN, onEnd: (() -> Unit)? = null) {
         val outgoingView = getBindingRootForType(currentActiveSheet)
         sheetNavigationStack.clear()
         currentActiveSheet = SheetType.NONE
-        animateSheetTransition(outgoingView, null, transition)
+        animateSheetTransition(outgoingView, null, transition, onEnd)
     }
 
     private fun getBindingRootForType(type: SheetType): View? = when (type) {
@@ -799,6 +820,9 @@ class MappingFragmentLogic(
         // Ensure margin is at least statusBarHeight + baseMargin
         params.topMargin = statusBarHeight + baseMargin
 
+        // No bottom margin — sheets overlap the bottom nav bar
+        params.bottomMargin = 0
+
         view.layoutParams = params
         view.requestLayout()
     }
@@ -882,8 +906,8 @@ class MappingFragmentLogic(
 
         hideBottomNavigation {
             val sheetBinding = fragment.binding.bottomSheetNewLine
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
 
             // Reset height to WRAP_CONTENT (like collect point bottom sheet)
             sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -1032,45 +1056,47 @@ class MappingFragmentLogic(
         val sheetBinding = fragment.binding.bottomSheetNewLine
         adjustMapsButtonsForBottomSheet(closingView = sheetBinding.root)
 
-        popSheet(transition)
-        
-        fragment.isCreatingNewLine = false
-        // Revert code IDs for discarded points ONLY if not saved
-        if (!fragment.isNewLineSaved) {
-            fragment.newLinePoints.forEach { pt ->
-                val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == pt.id }
-                if (idx >= 0) {
-                    // Clear the temporary line code we gave them
-                    fragment.collectedLabeledPoints[idx] =
-                        fragment.collectedLabeledPoints[idx].copy(codeId = "")
+        val afterAnimation: () -> Unit = {
+            fragment.isCreatingNewLine = false
+            // Revert code IDs for discarded points ONLY if not saved
+            if (!fragment.isNewLineSaved) {
+                fragment.newLinePoints.forEach { pt ->
+                    val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == pt.id }
+                    if (idx >= 0) {
+                        // Clear the temporary line code we gave them
+                        fragment.collectedLabeledPoints[idx] =
+                            fragment.collectedLabeledPoints[idx].copy(codeId = "")
+                    }
                 }
             }
-        }
-        // Reset the saved flag for next time
-        fragment.isNewLineSaved = false
+            // Reset the saved flag for next time
+            fragment.isNewLineSaved = false
 
-        fragment.newLinePoints.clear()
-        fragment.newLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-        }
-        fragment.newLineOverlay = null
-
-        fragment.closingSegmentOverlay?.let {
-            if (fragment.binding.mapView.overlays.contains(it)) {
-                fragment.binding.mapView.overlays.remove(it)
+            fragment.newLinePoints.clear()
+            fragment.newLineOverlay?.let {
+                OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
             }
-        }
-        fragment.closingSegmentOverlay = null
+            fragment.newLineOverlay = null
 
-        // Force refresh markers to show reverted state
-        updateMarkersForZoom(forceRefresh = true)
-        fragment.binding.mapView.invalidate()
+            fragment.closingSegmentOverlay?.let {
+                if (fragment.binding.mapView.overlays.contains(it)) {
+                    fragment.binding.mapView.overlays.remove(it)
+                }
+            }
+            fragment.closingSegmentOverlay = null
 
-        if (showNav) {
-            restoreStateAfterClosingInfoSheet()
-            showBottomNavigation(force = true)
+            // Force refresh markers to show reverted state
+            updateMarkersForZoom(forceRefresh = true)
+            fragment.binding.mapView.invalidate()
+
+            if (showNav) {
+                restoreStateAfterClosingInfoSheet()
+                showBottomNavigation(force = true)
+            }
+            onHidden?.invoke()
         }
-        onHidden?.invoke()
+
+        popSheet(transition, afterAnimation)
     }
 
     fun transferPointToCurrentLine(point: LabeledPoint): String? {
@@ -2036,8 +2062,8 @@ class MappingFragmentLogic(
             // Ensure bottom navigation is visible for line segment sheet
             showBottomNavigation(force = true)
 
-            sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
             sheetBinding.tvCodeId.text = lineSegment.codeId.ifEmpty { "No code" }
             sheetBinding.llCodeIdContainer.visibility = View.VISIBLE
             sheetBinding.viewTypeDot.visibility = View.GONE
@@ -2196,29 +2222,31 @@ class MappingFragmentLogic(
         fragment.binding.root.setOnTouchListener(null)
         fragment.binding.mapView.setOnTouchListener(null)
 
-        popSheet(transition) // Replacing manual animation with popSheet
-        
-        onHidden?.invoke()
-        resetLineSegmentSheetToDefaultState()
-        sheetBinding.llPointLineInfo.visibility = View.GONE
+        val afterAnimation: () -> Unit = {
+            onHidden?.invoke()
+            resetLineSegmentSheetToDefaultState()
+            sheetBinding.llPointLineInfo.visibility = View.GONE
 
-        // RESTORE map interaction and buttons when closed
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.setOnTouchListener(null)
-        fragment.binding.llMapsButtons.visibility = View.VISIBLE
+            // RESTORE map interaction and buttons when closed
+            fragment.binding.mapView.setMultiTouchControls(true)
+            fragment.binding.mapView.setOnTouchListener(null)
+            fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
-        if (clearState) {
-            fragment.highlightedLineOverlay?.unhighlight()
-            val wasCollectingStr = fragment.wasCollectingBeforePointDetails
-            fragment.highlightedLineOverlay = null
-            fragment.wasCollectingBeforePointDetails = false
-            fragment.selectedPoint = null
-            updateMarkersForZoom(forceRefresh = true)
-            fragment.binding.mapView.invalidate()
-            if (wasCollectingStr && fragment.currentLineCodeId != null) showCollectPointBottomSheet() else if (showNav) restoreStateAfterClosingInfoSheet()
-        } else if (showNav) {
-            restoreStateAfterClosingInfoSheet()
+            if (clearState) {
+                fragment.highlightedLineOverlay?.unhighlight()
+                val wasCollectingStr = fragment.wasCollectingBeforePointDetails
+                fragment.highlightedLineOverlay = null
+                fragment.wasCollectingBeforePointDetails = false
+                fragment.selectedPoint = null
+                updateMarkersForZoom(forceRefresh = true)
+                fragment.binding.mapView.invalidate()
+                if (wasCollectingStr && fragment.currentLineCodeId != null) showCollectPointBottomSheet() else if (showNav) restoreStateAfterClosingInfoSheet()
+            } else if (showNav) {
+                restoreStateAfterClosingInfoSheet()
+            }
         }
+
+        popSheet(transition, afterAnimation)
     }
 
     fun showPointDetailsBottomSheet(
@@ -2260,8 +2288,8 @@ class MappingFragmentLogic(
                 sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
                 sheetBinding.root.requestLayout()
 
-                sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-                sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+                sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+                sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
                 sheetBinding.llPointLineInfo.visibility = View.GONE
                 sheetBinding.txtPointId.text = point.id
                 sheetBinding.txtPointId.visibility = View.VISIBLE
@@ -2366,8 +2394,8 @@ class MappingFragmentLogic(
         showSheet(SheetType.OBJECT_LIST, transition) {
             hideBottomNavigation {
             // Ensure object list is above other sheets (e.g., edit line)
-            sheetBinding.root.elevation = 30f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 30f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 32f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 32f * fragment.resources.displayMetrics.density
             sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
@@ -2584,33 +2612,36 @@ class MappingFragmentLogic(
         val sheetBinding = fragment.binding.bottomSheetObjectList
         adjustMapsButtonsForBottomSheet(closingView = sheetBinding.root)
 
-        popSheet(transition)
-        if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE && fragment.binding.bottomSheetNewLine.root.visibility != View.VISIBLE) {
-            restoreStateAfterClosingInfoSheet()
-        }
-        // If edit line is open underneath, refresh its list/counts after closing object list
-        if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE) {
-            val ls = fragment.pendingEditLineSegment
-            val b = fragment.currentEditLineBinding
-            val adapter = fragment.currentEditLineAdapter
-            if (ls != null && b != null && adapter != null) {
-                val currentPoints = adapter.getPoints()
-                // Keep pending line synced to current unsaved edit state while edit sheet is open.
-                ls.labeledPoints = currentPoints.toList()
-
-                val count = currentPoints.size
-                b.tvPointsCount.text = "${count} ${if (count == 1) "Point" else "Points"}"
-                val canClose = count >= 3
-                b.cbClosedLine.isEnabled = canClose
-                val colorRes = if (canClose) R.color.text_primary else R.color.neutral_dark
-                b.tvClosedLineLabel.setTextColor(
-                    ContextCompat.getColor(fragment.requireContext(), colorRes)
-                )
-                if (!canClose && b.cbClosedLine.isChecked) b.cbClosedLine.isChecked = false
-                updateEditLineOverlay()
+        val afterAnimation: () -> Unit = {
+            if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE && fragment.binding.bottomSheetNewLine.root.visibility != View.VISIBLE) {
+                restoreStateAfterClosingInfoSheet()
             }
+            // If edit line is open underneath, refresh its list/counts after closing object list
+            if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE) {
+                val ls = fragment.pendingEditLineSegment
+                val b = fragment.currentEditLineBinding
+                val adapter = fragment.currentEditLineAdapter
+                if (ls != null && b != null && adapter != null) {
+                    val currentPoints = adapter.getPoints()
+                    // Keep pending line synced to current unsaved edit state while edit sheet is open.
+                    ls.labeledPoints = currentPoints.toList()
+
+                    val count = currentPoints.size
+                    b.tvPointsCount.text = "${count} ${if (count == 1) "Point" else "Points"}"
+                    val canClose = count >= 3
+                    b.cbClosedLine.isEnabled = canClose
+                    val colorRes = if (canClose) R.color.text_primary else R.color.neutral_dark
+                    b.tvClosedLineLabel.setTextColor(
+                        ContextCompat.getColor(fragment.requireContext(), colorRes)
+                    )
+                    if (!canClose && b.cbClosedLine.isChecked) b.cbClosedLine.isChecked = false
+                    updateEditLineOverlay()
+                }
+            }
+            onHidden?.invoke()
         }
-        onHidden?.invoke()
+
+        popSheet(transition, afterAnimation)
     }
 
     fun processCollectedPointsForObjectList(): List<ObjectListItem> {
@@ -2706,8 +2737,8 @@ class MappingFragmentLogic(
         val sheetBinding = fragment.binding.bottomSheetCollectPoint
         showSheet(SheetType.COLLECT_POINT, transition) {
             hideBottomNavigation {
-                sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-                sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+                sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+                sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
 
                 // Reset height to WRAP_CONTENT
                 sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -3244,8 +3275,8 @@ class MappingFragmentLogic(
         val shouldShowNavOnClose = showNavOnCloseOverride ?: (collectSheetBinding == null)
 
         hideBottomNavigation {
-            sheetBinding.root.elevation = 40f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 40f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 48f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 48f * fragment.resources.displayMetrics.density
             sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
@@ -3381,11 +3412,15 @@ class MappingFragmentLogic(
         vf.outAnimation = null
 
         hideKeyboard(fragment.binding.bottomSheetSelectCode.root)
-        popSheet(transition)
-        onHidden?.invoke()
-        if (showNav) {
-            restoreStateAfterClosingInfoSheet()
+
+        val afterAnimation: () -> Unit = {
+            onHidden?.invoke()
+            if (showNav) {
+                restoreStateAfterClosingInfoSheet()
+            }
         }
+
+        popSheet(transition, afterAnimation)
     }
 
 
@@ -4327,56 +4362,27 @@ class MappingFragmentLogic(
     }
 
     fun hideBottomNavigation(onEnd: (() -> Unit)? = null) {
-        // If in stakeout mode, hide its UI temporarily
+        // Bottom nav is always visible; sheets overlap it
+        // Only handle stakeout UI if needed
         if (fragment.currentStakeoutMode != StakeoutMode.NONE) {
             fragment.helper.hideStakeoutUI(showNav = false)
         }
-
-        (fragment.activity as? MainActivity)?.setNavHiddenState(true)
-
-        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.let { nav ->
-            if (nav.visibility == View.GONE) {
-                onEnd?.invoke()
-                return@let
-            }
-            nav.animate().cancel()
-            nav.translationY = 0f
-            nav.visibility = View.GONE
-            onEnd?.invoke()
-
-        } ?: onEnd?.invoke()
+        onEnd?.invoke()
     }
 
     fun showBottomNavigation(force: Boolean = false) {
-        if (!force && isAnyBottomSheetOpenExcludingLineSegment()) return
+        // Bottom nav is always visible; just reset UI element positions
+        fragment.binding.btnCollect.animate().cancel()
+        fragment.binding.btnCollect.translationY = -bottomNavOffset
 
-        (fragment.activity as? MainActivity)?.setNavHiddenState(false)
+        fragment.binding.llMapsButtons.animate().cancel()
+        fragment.binding.llMapsButtons.translationY = 0f
 
-        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.let { nav ->
-            nav.animate().cancel()
-            nav.visibility = View.VISIBLE
-            nav.translationY = 0f
-
-            fragment.binding.btnCollect.animate().cancel()
-            fragment.binding.btnCollect.translationY = -bottomNavOffset
-
-            fragment.binding.llMapsButtons.animate().cancel()
-            fragment.binding.llMapsButtons.translationY = 0f
-
-            // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin
-            if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
-                fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
-                    bottomMargin = bottomNavOffset.toInt()
-                }
+        // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin to float above nav
+        if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
+            fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                bottomMargin = bottomNavOffset.toInt()
             }
-
-            nav.animate()
-                .translationY(0f)
-                .alpha(1f)
-                .setDuration(200)
-                .withEndAction {
-                    fragment.binding.btnCollect.translationY = -bottomNavOffset
-                }.start()
         }
     }
 
@@ -5703,8 +5709,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
         // Execute Show Logic IMMEDIATELY
         val sheetBinding = fragment.binding.bottomSheetEditLine
-        sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-        sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+        sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+        sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
 
         sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
         sheetBinding.root.requestLayout()
@@ -6199,8 +6205,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         val sheetBinding = fragment.binding.bottomSheetNewPoint
         hideBottomNavigation {
             // Ensure New Point sheet is above any other visible sheet
-            sheetBinding.root.elevation = 30f * fragment.resources.displayMetrics.density
-            sheetBinding.root.translationZ = 30f * fragment.resources.displayMetrics.density
+            sheetBinding.root.elevation = 32f * fragment.resources.displayMetrics.density
+            sheetBinding.root.translationZ = 32f * fragment.resources.displayMetrics.density
             sheetBinding.root.bringToFront()
 
             applyFullScreenConstraints(sheetBinding.root)
@@ -6730,18 +6736,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         point: LabeledPoint,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP
     ) = hideMenu {
-        // Hide bottom navigation immediately (no animation) for edit point
-        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
-            animate().cancel()
-            visibility = View.GONE
-            alpha = 1f
-            translationY = 0f
-        }
-
-        (fragment.activity as? MainActivity)?.setNavHiddenState(true)
         val sheetBinding = fragment.binding.bottomSheetEditPoint
-        sheetBinding.root.elevation = 20f * fragment.resources.displayMetrics.density
-        sheetBinding.root.translationZ = 20f * fragment.resources.displayMetrics.density
+        sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
+        sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
         sheetBinding.root.bringToFront()
         sheetBinding.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
             bottomMargin = 0
@@ -6912,7 +6909,6 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             alpha = 1f
             translationY = 0f
         }
-        (fragment.activity as? MainActivity)?.setNavHiddenState(false)
 
         animateSheetTransition(root, null, transition) {
             onHidden?.invoke()

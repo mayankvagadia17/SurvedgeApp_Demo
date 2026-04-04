@@ -8,8 +8,10 @@ Entries are prepended — newest first.
 
 | session | date | focus | files | summary |
 |---------|------|-------|-------|---------|
+| 21 | 2026-04-04 | feat: bottom sheets always overlap nav tabs | 5 files | Redesigned bottom navigation behavior — nav always visible, sheets overlap with proper elevation. Removed nav hide/show state machine; simplified inset listener. All sheets now have elevation > nav (16dp) for correct z-order. |
+| n/a | 2026-04-04 | fix: bottom sheet safe area padding | 2 files | Fixed bottom sheets extending into system nav bar safe area by adding proper bottom margin. |
+| 20 | 2026-04-04 | fix: bottom sheet nav visibility timing | 4 files | Fixed race condition where bottom nav stayed hidden after closing sheets — moved nav restore into animation callback. |
 | n/a | 2026-04-04 | fix: line sheet overlapping | 2 files | Fixed bottom sheet overlapping issues by controlling title visibility and managing state during sheet transitions |
-| 20 | 2026-04-04 | fix: bottom sheet navigation sequencing | 2 files | Fixed visual overlap between bottom sheets and navigation tabs by ensuring nav hides before sheet shows |
 | 19 | 2026-04-04 | index-drift + changelog: Final sync | 4 files | Final documentation sync — all 19 sessions complete |
 | 18 | 2026-04-04 | docs/utils | 2 files | Documented CSVExporter and JSONImporter with file format specs |
 | 17 | 2026-04-04 | docs/ui/stakeout | 2 files | Documented stakeout models, utility functions, and domain terminology |

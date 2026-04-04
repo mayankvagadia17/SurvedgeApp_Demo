@@ -46,18 +46,25 @@ A utility class specialized in configuring the map environment and handling form
 3.  **Processing**: `MappingFragmentLogic` updates the shared point list and calculates any changes to prefixes or sequence counters.
 4.  **UI Refresh**: `Logic` (for data-driven overlays) or `Helper` (for map-driven state) updates the map and invalidates the view to trigger a redraw.
 
-## Bottom Sheet Navigation & Sequencing
+## Bottom Sheet Navigation & Layering
 
-The mapping section uses a custom "Sheet Navigation" system to manage multiple overlays (bottom sheets) with proper lifecycle handling. When opening a bottom sheet:
+The mapping section uses a custom "Sheet Navigation" system to manage multiple overlays (bottom sheets) with proper z-order and animation sequencing. The bottom navigation tabs remain **always visible** — bottom sheets smoothly slide up and overlap the navigation bar, creating a modern layered UI.
+
+### Sheet Opening Behavior
+
+When opening a bottom sheet:
 
 1. **Menu Hiding**: The `hideMenu {}` callback hides any open context menus.
-2. **Navigation Hiding**: The `hideBottomNavigation {}` callback slides the bottom navigation bar out of view **first**, waiting for the animation to complete.
-3. **Sheet Display**: Only after the navigation is fully hidden does the `showSheet(SheetType.XXX) {}` callback display the new bottom sheet.
+2. **Sheet Display**: The `showSheet(SheetType.XXX) {}` callback displays the new bottom sheet immediately (no nav hiding needed).
+3. **Elevation Control**: All sheets have elevation higher than the bottom navigation view (16dp), ensuring they render on top:
+   - Standard sheets: 24dp elevation
+   - Full-screen sheets (Object List, Select Code): 32dp elevation
+   - High-priority sheets (Select Code): 48dp elevation
 
-This sequential ordering (hideMenu → hideBottomNavigation → showSheet) prevents visual overlap between the bottom sheet and the navigation tab bar. All six primary bottom sheet functions (`showNewLineBottomSheet`, `showSelectPointBottomSheet`, `showLineSegmentDetailsBottomSheet`, `showObjectListBottomSheet`, `showCollectPointBottomSheet`, `showEditLineBottomSheet`) follow this pattern.
+### Sheet Visibility & Overlapping
 
-### Sheet Visibility & Title Control
-
-- **Object List Sheet**: The `showObjectListBottomSheet()` function supports an optional `showTitle` parameter (default `true`) to hide the title when the Object List is displayed alongside other sheets, reducing visual clutter.
-- **State Restoration**: After closing sheets, the system checks if other sheets (Edit Line, New Line) remain open before restoring navigation visibility. This prevents navigation from reappearing while the user is still in a sheet workflow.
-- **New Line to Object List Transition**: When transitioning from Object List back to New Line mode, the system uses the back-stack callback (`pushBackStack`) to properly restore the New Line sheet with a slide-down animation, maintaining visual continuity.
+- **Always-Visible Navigation**: The bottom navigation bar is never hidden during sheet operations. Sheets seamlessly overlap it while the navigation items remain functional.
+- **Elevation Hierarchy**: `MappingFragmentLogic` sets sheet elevation dynamically (e.g., `sheetBinding.root.elevation = 24f * density`), and the layout XML defines baseline elevation values (20dp). This ensures proper z-order stacking.
+- **Object List Sheet**: The `showObjectListBottomSheet()` function supports an optional `showTitle` parameter (default `true`) to hide the title when displayed alongside other sheets, reducing visual clutter.
+- **State Restoration**: After closing sheets, `restoreStateAfterClosingInfoSheet()` re-enables map touch and restores UI element positions (e.g., collect button above nav bar). Navigation visibility is unchanged since the nav is always visible.
+- **Line Segment Sheet Special Case**: The `bottomSheetLineSegment` sheet has `bottomMargin = bottomNavOffset`, causing it to float above the navigation bar rather than overlap it. This is intentional for this small info sheet.
