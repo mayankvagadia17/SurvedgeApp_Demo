@@ -55,3 +55,9 @@ The mapping section uses a custom "Sheet Navigation" system to manage multiple o
 3. **Sheet Display**: Only after the navigation is fully hidden does the `showSheet(SheetType.XXX) {}` callback display the new bottom sheet.
 
 This sequential ordering (hideMenu → hideBottomNavigation → showSheet) prevents visual overlap between the bottom sheet and the navigation tab bar. All six primary bottom sheet functions (`showNewLineBottomSheet`, `showSelectPointBottomSheet`, `showLineSegmentDetailsBottomSheet`, `showObjectListBottomSheet`, `showCollectPointBottomSheet`, `showEditLineBottomSheet`) follow this pattern.
+
+### Sheet Visibility & Title Control
+
+- **Object List Sheet**: The `showObjectListBottomSheet()` function supports an optional `showTitle` parameter (default `true`) to hide the title when the Object List is displayed alongside other sheets, reducing visual clutter.
+- **State Restoration**: After closing sheets, the system checks if other sheets (Edit Line, New Line) remain open before restoring navigation visibility. This prevents navigation from reappearing while the user is still in a sheet workflow.
+- **New Line to Object List Transition**: When transitioning from Object List back to New Line mode, the system uses the back-stack callback (`pushBackStack`) to properly restore the New Line sheet with a slide-down animation, maintaining visual continuity.

@@ -2088,6 +2088,17 @@ class MappingFragmentLogic(
             sheetBinding.llEdit.visibility = View.VISIBLE
             sheetBinding.btnMenu.visibility = View.VISIBLE
 
+            // Reset button to three-dot menu for line segments
+            sheetBinding.btnMenu.setImageResource(R.drawable.ic_more)
+            sheetBinding.btnMenu.rotation = 90f
+            sheetBinding.btnMenu.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            sheetBinding.btnMenu.setPadding(
+                (10 * fragment.resources.displayMetrics.density).toInt(),
+                (10 * fragment.resources.displayMetrics.density).toInt(),
+                (10 * fragment.resources.displayMetrics.density).toInt(),
+                (10 * fragment.resources.displayMetrics.density).toInt()
+            )
+
             setupBottomSheetClickToHideMenu(sheetBinding.root, sheetBinding)
             setupSwipeGestureForPointLineSelection(sheetBinding.root, sheetBinding)
 
@@ -2267,10 +2278,15 @@ class MappingFragmentLogic(
                     hideLineSegmentDetailsBottomSheet()
                 }
                 sheetBinding.btnMenu.setOnClickListener {
-                    if (sheetBinding.clLineMenu.visibility == View.VISIBLE) {
-                        hidePointLineSelection(sheetBinding)
+                    if (!isLine) {
+                        hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
+                        showEditPointBottomSheet(point)
                     } else {
-                        showPointLineSelection(sheetBinding)
+                        if (sheetBinding.clLineMenu.visibility == View.VISIBLE) {
+                            hidePointLineSelection(sheetBinding)
+                        } else {
+                            showPointLineSelection(sheetBinding)
+                        }
                     }
                 }
                 sheetBinding.llContinueCollect.visibility = View.GONE // Selection from point doesn't support continue yet
@@ -2287,6 +2303,19 @@ class MappingFragmentLogic(
 
                 // Hide the menu entirely if it's a line point (since it has no edit options)
                 sheetBinding.btnMenu.visibility = if (!isLine) View.VISIBLE else View.GONE
+
+                // For standalone points: show Edit icon; for line points: show three-dot menu
+                if (!isLine) {
+                    sheetBinding.btnMenu.setImageResource(R.drawable.ic_edit)
+                    sheetBinding.btnMenu.rotation = 0f
+                    sheetBinding.btnMenu.scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    sheetBinding.btnMenu.setPadding(
+                        (4 * fragment.resources.displayMetrics.density).toInt(),
+                        (4 * fragment.resources.displayMetrics.density).toInt(),
+                        (4 * fragment.resources.displayMetrics.density).toInt(),
+                        (4 * fragment.resources.displayMetrics.density).toInt()
+                    )
+                }
 
                 setupBottomSheetClickToHideMenu(sheetBinding.root, sheetBinding)
                 setupSwipeGestureForPointLineSelection(sheetBinding.root, sheetBinding)

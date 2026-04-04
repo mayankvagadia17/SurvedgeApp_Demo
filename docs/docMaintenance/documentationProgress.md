@@ -32,6 +32,8 @@ breadcrumb: [docs](../index.md) > [docMaintenance](.) > documentationProgress
 | docs/ui/mapping/readme.md | complete | 2026-04-04 |
 | docs/ui/mapping/aiContext.md | complete | 2026-04-04 |
 | docs/ui/mapping/fragment/readme.md | complete | 2026-04-04 |
+| docs/docMaintenance/changelog.md | complete | 2026-04-04 |
+| docs/docMaintenance/changelog.json | complete | 2026-04-04 |
 | docs/ui/mapping/viewmodel/readme.md | complete | 2026-04-04 |
 | docs/ui/mapping/overlay/readme.md | complete | 2026-04-04 |
 | docs/ui/mapping/adapter/readme.md | complete | 2026-04-04 |

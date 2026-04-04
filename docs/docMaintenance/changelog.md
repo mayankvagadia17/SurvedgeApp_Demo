@@ -8,6 +8,7 @@ Entries are prepended — newest first.
 
 | session | date | focus | files | summary |
 |---------|------|-------|-------|---------|
+| n/a | 2026-04-04 | fix: line sheet overlapping | 2 files | Fixed bottom sheet overlapping issues by controlling title visibility and managing state during sheet transitions |
 | 20 | 2026-04-04 | fix: bottom sheet navigation sequencing | 2 files | Fixed visual overlap between bottom sheets and navigation tabs by ensuring nav hides before sheet shows |
 | 19 | 2026-04-04 | index-drift + changelog: Final sync | 4 files | Final documentation sync — all 19 sessions complete |
 | 18 | 2026-04-04 | docs/utils | 2 files | Documented CSVExporter and JSONImporter with file format specs |

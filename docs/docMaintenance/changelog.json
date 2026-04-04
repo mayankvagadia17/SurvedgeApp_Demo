@@ -1,5 +1,12 @@
 [
   {
+    "session": "n/a",
+    "date": "2026-04-04",
+    "focus": "fix: line sheet overlapping",
+    "files": ["app/src/main/java/com/nexova/survedge/ui/mapping/fragment/MappingFragmentLogic.kt", "app/src/main/res/layout/bottom_sheet_object_list.xml"],
+    "summary": "Fixed bottom sheet overlapping issues by controlling title visibility and managing state during sheet transitions"
+  },
+  {
     "session": 20,
     "date": "2026-04-04",
     "focus": "fix: bottom sheet navigation sequencing",
