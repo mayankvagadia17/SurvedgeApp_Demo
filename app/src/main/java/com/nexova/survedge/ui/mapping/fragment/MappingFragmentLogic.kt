@@ -2014,6 +2014,12 @@ class MappingFragmentLogic(
     }
 
     fun handleLineSegmentClick(clickedPolyline: ClickablePolylineOverlay) {
+        // Block all map interactions when Select Code or Collect Point sheets are open
+        if (fragment.binding.bottomSheetSelectCode.root.visibility == View.VISIBLE ||
+            fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE) {
+            return
+        }
+
         hideLineSegmentMenuThen {
             // Hide stakeout bottom sheet if it's currently visible (prevents overlap)
             if (fragment.currentStakeoutMode != StakeoutMode.NONE) {
@@ -3752,6 +3758,12 @@ class MappingFragmentLogic(
     }
 
     private fun handlePointClick(point: LabeledPoint): Boolean {
+        // Block all map interactions when Select Code or Collect Point sheets are open
+        if (fragment.binding.bottomSheetSelectCode.root.visibility == View.VISIBLE ||
+            fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE) {
+            return true
+        }
+
         // New Line Creation Mode Check (Robust: Flag OR UI Visibility)
         if (fragment.isCreatingNewLine || fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
             addPointToNewLine(point)
