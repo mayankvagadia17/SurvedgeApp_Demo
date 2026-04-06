@@ -2080,20 +2080,16 @@ class MappingFragmentLogic(
                 forceRefresh = true
             )
 
-            if (fragment.highlightedLineOverlay == clickedPolyline) {
-                fragment.highlightedLineOverlay = null
-                updateMarkersForZoom(forceRefresh = true)
-            } else {
-                clickedPolyline.highlight(
-                    ContextCompat.getColor(
-                        fragment.requireContext(),
-                        R.color.primary
-                    )
+            // Always highlight and show the bottom sheet (don't deselect on second click, like points)
+            clickedPolyline.highlight(
+                ContextCompat.getColor(
+                    fragment.requireContext(),
+                    R.color.primary
                 )
-                fragment.highlightedLineOverlay = clickedPolyline
-                showLineSegmentDetailsBottomSheet(clickedPolyline)
-                updateMarkersForZoom(forceRefresh = true)
-            }
+            )
+            fragment.highlightedLineOverlay = clickedPolyline
+            showLineSegmentDetailsBottomSheet(clickedPolyline)
+            updateMarkersForZoom(forceRefresh = true)
             fragment.binding.mapView.invalidate()
         }
     }
