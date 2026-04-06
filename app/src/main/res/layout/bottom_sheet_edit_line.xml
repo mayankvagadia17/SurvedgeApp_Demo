@@ -257,7 +257,6 @@
                 android:id="@+id/rv_points"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"
                 android:clipToPadding="false"
                 android:clipChildren="false"
                 android:paddingHorizontal="@dimen/_15sdp" />
