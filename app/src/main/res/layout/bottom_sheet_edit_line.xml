@@ -240,28 +240,19 @@
             </androidx.constraintlayout.widget.ConstraintLayout>
         </androidx.constraintlayout.widget.ConstraintLayout>
 
-        <androidx.core.widget.NestedScrollView
-            android:id="@+id/nsv_points_container"
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_points"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="@dimen/_5sdp"
             android:clipToPadding="false"
             android:clipChildren="false"
+            android:paddingHorizontal="@dimen/_15sdp"
             app:layout_constrainedHeight="true"
             app:layout_constraintHeight_default="wrap"
             app:layout_constraintHeight_max="@dimen/_300sdp"
             app:layout_constraintBottom_toTopOf="@id/btn_save_edit"
-            app:layout_constraintTop_toBottomOf="@id/cl_header_top">
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rv_points"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:clipToPadding="false"
-                android:clipChildren="false"
-                android:paddingHorizontal="@dimen/_15sdp" />
-
-        </androidx.core.widget.NestedScrollView>
+            app:layout_constraintTop_toBottomOf="@id/cl_header_top" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_save_edit"
@@ -280,7 +271,7 @@
             app:backgroundTint="@null"
             app:cornerRadius="@dimen/_12sdp"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/nsv_points_container" />
+            app:layout_constraintTop_toBottomOf="@id/rv_points" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -1017,18 +1017,65 @@ class MappingFragmentLogic(
                     val fromPos = viewHolder.adapterPosition
                     val toPos = target.adapterPosition
                     if (fromPos == toPos) return false
-                    
+
                     java.util.Collections.swap(fragment.newLinePoints, fromPos, toPos)
                     (recyclerView.adapter as? ObjectListAdapter)?.moveItem(fromPos, toPos)
-                    
+
                     // Update only specific overlay without re-reading the whole list
                     updateNewLineOverlay()
-                    
+
                     // Light UI update: just refresh the count label, don't recalculate distance during active drag
                     val count = fragment.newLinePoints.size
                     sheetBinding.tvPointsCount.text = "$count Points"
-                    
+
                     return true
+                }
+
+                override fun onChildDraw(
+                    c: Canvas,
+                    recyclerView: RecyclerView,
+                    viewHolder: RecyclerView.ViewHolder,
+                    dX: Float,
+                    dY: Float,
+                    actionState: Int,
+                    isCurrentlyActive: Boolean
+                ) {
+                    super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+
+                    if (actionState == ItemTouchHelper.ACTION_STATE_DRAG && isCurrentlyActive) {
+                        val itemView = viewHolder.itemView
+                        val recyclerView = recyclerView
+                        val itemHeight = itemView.height
+
+                        val recyclerTop = recyclerView.top
+                        val recyclerBottom = recyclerView.bottom
+                        val itemTop = itemView.top + dY.toInt()
+                        val itemBottom = itemView.bottom + dY.toInt()
+
+                        val scrollThreshold = itemHeight
+                        val maxScrollSpeed = 50
+
+                        when {
+                            itemTop <= recyclerTop + scrollThreshold -> {
+                                val distanceFromTop = (itemTop - recyclerTop).toFloat()
+                                val scrollSpeed = if (distanceFromTop > 0) {
+                                    (maxScrollSpeed * (1 - (distanceFromTop / scrollThreshold))).toInt()
+                                } else {
+                                    maxScrollSpeed
+                                }
+                                recyclerView.scrollBy(0, -scrollSpeed)
+                            }
+                            itemBottom >= recyclerBottom - scrollThreshold -> {
+                                val distanceFromBottom = (recyclerBottom - itemBottom).toFloat()
+                                val scrollSpeed = if (distanceFromBottom > 0) {
+                                    (maxScrollSpeed * (1 - (distanceFromBottom / scrollThreshold))).toInt()
+                                } else {
+                                    maxScrollSpeed
+                                }
+                                recyclerView.scrollBy(0, scrollSpeed)
+                            }
+                        }
+                    }
                 }
 
                 override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
@@ -5518,7 +5565,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     initialY = event.rawY
                     initialX = event.rawX
                     isDragging = false
-                    startHeight = sheetBinding.nsvPointsContainer.height
+                    startHeight = sheetBinding.rvPoints.height
 
                     // Measure base height with exactly 3 items (~170dp)
                     val collapsedListHeight = (170 * fragment.resources.displayMetrics.density).toInt()
@@ -5547,7 +5594,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     if (!isDragging && Math.abs(deltaY) > 20f && Math.abs(deltaY) > Math.abs(deltaX)) {
                         isDragging = true
                         view.parent?.requestDisallowInterceptTouchEvent(true)
-                        startHeight = sheetBinding.nsvPointsContainer.height
+                        startHeight = sheetBinding.rvPoints.height
                     }
 
                     if (isDragging) {
@@ -5555,9 +5602,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                         val constrainedHeight = newHeight.coerceAtMost(fullHeight)
                         val finalHeight = Math.max(originalHeight, constrainedHeight)
 
-                        val lp = sheetBinding.nsvPointsContainer.layoutParams
+                        val lp = sheetBinding.rvPoints.layoutParams
                         lp.height = finalHeight
-                        sheetBinding.nsvPointsContainer.layoutParams = lp
+                        sheetBinding.rvPoints.layoutParams = lp
                         return@OnTouchListener true
                     }
                     false
@@ -5567,7 +5614,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     view.parent?.requestDisallowInterceptTouchEvent(false)
                     if (isDragging) {
                         val deltaY = initialY - event.rawY
-                        val currentHeight = sheetBinding.nsvPointsContainer.height
+                        val currentHeight = sheetBinding.rvPoints.height
                         val parentHeight =
                             (sheetBinding.root.parent as? View)?.height
                                 ?: fragment.resources.displayMetrics.heightPixels
@@ -5587,12 +5634,12 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             // Collapse
                             val anim = ValueAnimator.ofInt(currentHeight, originalHeight)
                             anim.addUpdateListener { va ->
-                                val lp = sheetBinding.nsvPointsContainer.layoutParams
+                                val lp = sheetBinding.rvPoints.layoutParams
                                 lp.height = va.animatedValue as Int
-                                sheetBinding.nsvPointsContainer.layoutParams = lp
+                                sheetBinding.rvPoints.layoutParams = lp
                             }
-                            anim.duration = 200
-                            anim.interpolator = OvershootInterpolator(0.5f)
+                            anim.duration = 150
+                            anim.interpolator = FastOutSlowInInterpolator()
                             anim.start()
 
                             fragment.binding.mapView.setMultiTouchControls(true)
@@ -5602,9 +5649,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             // Expand
                             val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
                             anim.addUpdateListener { va ->
-                                val lp = sheetBinding.nsvPointsContainer.layoutParams
+                                val lp = sheetBinding.rvPoints.layoutParams
                                 lp.height = va.animatedValue as Int
-                                sheetBinding.nsvPointsContainer.layoutParams = lp
+                                sheetBinding.rvPoints.layoutParams = lp
                             }
                             anim.addListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -5612,7 +5659,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                                     // but user asked for ONLY rv_points height to change.
                                 }
                             })
-                            anim.duration = 200
+                            anim.duration = 150
                             anim.interpolator = FastOutSlowInInterpolator()
                             anim.start()
 
@@ -5635,7 +5682,10 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
 
         fun attachListenerRecursively(view: View) {
-            view.setOnTouchListener(gestureListener)
+            // Don't attach gesture listener to RecyclerView - let it handle its own scrolling
+            if (view !is RecyclerView && view !is android.widget.ScrollView && view !is androidx.core.widget.NestedScrollView) {
+                view.setOnTouchListener(gestureListener)
+            }
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) {
                     attachListenerRecursively(view.getChildAt(i))
@@ -5824,7 +5874,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     v.animate().cancel()
                     v.elevation = 0f
                     v.translationZ = 0f
-                    
+
                     // Finalize overlay updates only after the drag session finishes.
                     updateEditLineOverlay()
                     updateMarkersForZoom(forceRefresh = true)
@@ -5841,6 +5891,53 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 // PREVENT flickering during drag by NOT calling updateEditLineOverlay here.
                 // It will be called in clearView once reordering settles.
                 return true
+            }
+
+            override fun onChildDraw(
+                c: Canvas,
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                dX: Float,
+                dY: Float,
+                actionState: Int,
+                isCurrentlyActive: Boolean
+            ) {
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG && isCurrentlyActive) {
+                    val itemView = viewHolder.itemView
+                    val recyclerView = recyclerView
+                    val itemHeight = itemView.height
+
+                    val recyclerTop = recyclerView.top
+                    val recyclerBottom = recyclerView.bottom
+                    val itemTop = itemView.top + dY.toInt()
+                    val itemBottom = itemView.bottom + dY.toInt()
+
+                    val scrollThreshold = itemHeight
+                    val maxScrollSpeed = 50
+
+                    when {
+                        itemTop <= recyclerTop + scrollThreshold -> {
+                            val distanceFromTop = (itemTop - recyclerTop).toFloat()
+                            val scrollSpeed = if (distanceFromTop > 0) {
+                                (maxScrollSpeed * (1 - (distanceFromTop / scrollThreshold))).toInt()
+                            } else {
+                                maxScrollSpeed
+                            }
+                            recyclerView.scrollBy(0, -scrollSpeed)
+                        }
+                        itemBottom >= recyclerBottom - scrollThreshold -> {
+                            val distanceFromBottom = (recyclerBottom - itemBottom).toFloat()
+                            val scrollSpeed = if (distanceFromBottom > 0) {
+                                (maxScrollSpeed * (1 - (distanceFromBottom / scrollThreshold))).toInt()
+                            } else {
+                                maxScrollSpeed
+                            }
+                            recyclerView.scrollBy(0, scrollSpeed)
+                        }
+                    }
+                }
             }
 
             override fun onSwiped(vh: RecyclerView.ViewHolder, d: Int) {}
@@ -6087,10 +6184,10 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         sheetBinding.root.bringToFront() // Ensure it's on top
 
         // Calculate initial collapsed height (3 items = 170dp)
-        val nsvParams = sheetBinding.nsvPointsContainer.layoutParams
+        val nsvParams = sheetBinding.rvPoints.layoutParams
         val collapsedListHeight = (170 * fragment.resources.displayMetrics.density).toInt()
         nsvParams.height = collapsedListHeight
-        sheetBinding.nsvPointsContainer.layoutParams = nsvParams
+        sheetBinding.rvPoints.layoutParams = nsvParams
 
         sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
         sheetBinding.root.requestLayout()
@@ -6124,15 +6221,24 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
                 if (keypadHeight > screenHeight * 0.15) { // Keyboard is open
                     if (!wasOpened) {
-                        // Expand only the list height
+                        // Expand only the list height with smooth animation
                         val parentHeight = (sheetBinding.root.parent as? View)?.height ?: screenHeight
                         val baseMargin = (25 * fragment.resources.displayMetrics.density).toInt()
                         val fullHeight = parentHeight - (statusBarHeight + baseMargin + 200) // approx room for footer/header
 
-                        val lp = sheetBinding.nsvPointsContainer.layoutParams
+                        val lp = sheetBinding.rvPoints.layoutParams
                         if (savedHeight == 0) savedHeight = lp.height
-                        lp.height = fullHeight
-                        sheetBinding.nsvPointsContainer.layoutParams = lp
+                        val currentHeight = lp.height
+
+                        val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
+                        anim.addUpdateListener { va ->
+                            val params = sheetBinding.rvPoints.layoutParams
+                            params.height = va.animatedValue as Int
+                            sheetBinding.rvPoints.layoutParams = params
+                        }
+                        anim.duration = 100
+                        anim.interpolator = FastOutSlowInInterpolator()
+                        anim.start()
 
                         wasOpened = true
                         // ... map touch logic ...
@@ -6144,9 +6250,19 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     }
                 } else { // Keyboard is closed
                     if (wasOpened) {
-                        val lp = sheetBinding.nsvPointsContainer.layoutParams
-                        lp.height = if (savedHeight > 0) savedHeight else (170 * fragment.resources.displayMetrics.density).toInt()
-                        sheetBinding.nsvPointsContainer.layoutParams = lp
+                        val lp = sheetBinding.rvPoints.layoutParams
+                        val collapsedHeight = if (savedHeight > 0) savedHeight else (170 * fragment.resources.displayMetrics.density).toInt()
+                        val currentHeight = lp.height
+
+                        val anim = ValueAnimator.ofInt(currentHeight, collapsedHeight)
+                        anim.addUpdateListener { va ->
+                            val params = sheetBinding.rvPoints.layoutParams
+                            params.height = va.animatedValue as Int
+                            sheetBinding.rvPoints.layoutParams = params
+                        }
+                        anim.duration = 100
+                        anim.interpolator = FastOutSlowInInterpolator()
+                        anim.start()
 
                         wasOpened = false
                         // ... re-enable map logic ...
