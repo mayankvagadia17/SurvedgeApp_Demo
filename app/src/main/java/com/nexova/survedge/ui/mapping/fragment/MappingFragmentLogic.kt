@@ -111,6 +111,7 @@ class MappingFragmentLogic(
     private var originalEditLineFeatureCode: String? = null
     private var isEditLineSaved = false
     private var selectCodeSearchWatcher: TextWatcher? = null
+    private var collectSheetLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     // --- New Sheet Management System ---
     enum class SheetType {
@@ -2762,7 +2763,10 @@ class MappingFragmentLogic(
                 setupSwipeGestureForDataCollectionSettings(sheetBinding.scrollContent, sheetBinding)
 
                 // Keyboard Handling: Expand to full screen when keyboard shows
-                sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                collectSheetLayoutListener?.let {
+                    sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(it)
+                }
+                val listener = object :
                     ViewTreeObserver.OnGlobalLayoutListener {
                     private var wasOpened = false
                     private var initialHeight = 0
@@ -2771,8 +2775,10 @@ class MappingFragmentLogic(
                     override fun onGlobalLayout() {
                         if (!sheetBinding.root.isAttachedToWindow) {
                             sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                            collectSheetLayoutListener = null
                             return
                         }
+                        if (sheetBinding.root.visibility != View.VISIBLE) return
 
                         val r = Rect()
                         sheetBinding.root.getWindowVisibleDisplayFrame(r)
@@ -2841,7 +2847,9 @@ class MappingFragmentLogic(
                             }
                         }
                     }
-                })
+                }
+                collectSheetLayoutListener = listener
+                sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(listener)
 
             if (fragment.selectedPointIndicatorType == IndicatorType.LINE && isLineCodeFromCodeId(
                     fragment.selectedPointCodeId
@@ -3440,6 +3448,21 @@ class MappingFragmentLogic(
             val outgoingView = getBindingRootForType(SheetType.SELECT_CODE)
             val incomingView = getBindingRootForType(previousSheet)
             currentActiveSheet = previousSheet
+
+            // Reset the incoming sheet's layout params if it's COLLECT_POINT
+            if (previousSheet == SheetType.COLLECT_POINT && incomingView != null) {
+                val params = incomingView.layoutParams as? ConstraintLayout.LayoutParams
+                if (params != null) {
+                    params.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                    params.topToTop = ConstraintLayout.LayoutParams.UNSET
+                    params.topMargin = 0
+                    params.verticalBias = 1.0f
+                    params.constrainedHeight = false
+                    incomingView.layoutParams = params
+                }
+                incomingView.requestLayout()
+            }
+
             animateSheetTransition(outgoingView, incomingView, transition, afterAnimation)
         } else {
             popSheet(transition, afterAnimation)
