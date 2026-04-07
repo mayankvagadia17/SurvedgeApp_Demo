@@ -1881,7 +1881,58 @@ class MappingFragmentLogic(
     }
 
 
-    fun deleteLineSegment(lineSegment: ClickablePolylineOverlay) {
+    fun showDeleteLineOptionsDialog(lineSegment: ClickablePolylineOverlay) {
+        val dialog = BottomSheetDialog(fragment.requireContext())
+        dialog.setContentView(R.layout.bottom_sheet_delete_line_options)
+
+        val btnKeepPoints = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_keep_points)
+        val btnDeleteAll = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_delete_all)
+        val btnCancel = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_cancel)
+
+        btnKeepPoints?.setOnClickListener {
+            deleteLineOnlyKeepPoints(lineSegment)
+            dialog.dismiss()
+        }
+
+        btnDeleteAll?.setOnClickListener {
+            deleteLineAndPoints(lineSegment)
+            dialog.dismiss()
+        }
+
+        btnCancel?.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    fun deleteLineOnlyKeepPoints(lineSegment: ClickablePolylineOverlay) {
+        // 1. Remove from completedLineOverlays
+        fragment.completedLineOverlays.remove(lineSegment)
+
+        // 2. Remove line from map overlays
+        fragment.binding.mapView.overlays.remove(lineSegment)
+
+        // 3. Remove line entity from DB
+        val lineEntity = collectedLines.find { it.line.id == lineSegment.codeId }?.line
+        if (lineEntity != null) {
+            viewModel.deleteLine(lineEntity)
+        }
+
+        // 4. Update UI
+        if (fragment.highlightedLineOverlay == lineSegment) {
+            fragment.highlightedLineOverlay = null
+        }
+        fragment.selectedPoint = null
+        updateMarkersForZoom()
+        fragment.binding.mapView.invalidate()
+        hideLineSegmentDetailsBottomSheet()
+        refreshNextPointIdForCollectSheet()
+
+        Toast.makeText(fragment.requireContext(), "Line deleted (Points kept)", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteLineAndPoints(lineSegment: ClickablePolylineOverlay) {
         // 1. Remove from completedLineOverlays
         fragment.completedLineOverlays.remove(lineSegment)
 
@@ -1910,7 +1961,7 @@ class MappingFragmentLogic(
             fragment.markerToPointMap.remove(marker)
         }
 
-        // 4. Update UI
+        // 5. Update UI
         if (fragment.highlightedLineOverlay == lineSegment) {
             fragment.highlightedLineOverlay = null
         }
@@ -1920,7 +1971,11 @@ class MappingFragmentLogic(
         hideLineSegmentDetailsBottomSheet()
         refreshNextPointIdForCollectSheet()
 
-        Toast.makeText(fragment.requireContext(), "Line deleted", Toast.LENGTH_SHORT).show()
+        Toast.makeText(fragment.requireContext(), "Line and points deleted", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteLineSegment(lineSegment: ClickablePolylineOverlay) {
+        deleteLineAndPoints(lineSegment)
     }
 
     fun deletePoint(point: LabeledPoint) {
@@ -2239,7 +2294,7 @@ class MappingFragmentLogic(
             })
 
             sheetBinding.llDeleteLineButton.setOnClickListener {
-                deleteLineSegment(lineSegment)
+                showDeleteLineOptionsDialog(lineSegment)
             }
 
             sheetBinding.btnStakeout.setSwipeSafeClickListener {
