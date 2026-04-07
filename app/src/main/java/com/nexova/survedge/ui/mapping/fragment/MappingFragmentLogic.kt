@@ -1098,6 +1098,14 @@ class MappingFragmentLogic(
         showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = true, sheetTitle = "Select Point")
     }
 
+    fun showObjectListBottomSheetInternalForEditLine(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
+        pushBackStack(SheetType.EDIT_LINE) {
+            val ls = fragment.pendingEditLineSegment ?: return@pushBackStack
+            showEditLineBottomSheet(ls, BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
+        }
+        showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = true, sheetTitle = "Select Point")
+    }
+
     fun hideNewLineBottomSheet(
         showNav: Boolean = true,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN,
@@ -2580,7 +2588,8 @@ class MappingFragmentLogic(
             })
 
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
-            setupSwipeToDismiss(sheetBinding.root) { hideObjectListBottomSheet() }
+            // Don't enable swipe-to-dismiss for object list; only allow closing via close button
+            // to prevent accidental swipes to the right when users interact with the list
             }
         }
     }
@@ -2669,6 +2678,9 @@ class MappingFragmentLogic(
         val afterAnimation: () -> Unit = {
             if (showNav && fragment.binding.bottomSheetEditLine.root.visibility != View.VISIBLE && fragment.binding.bottomSheetNewLine.root.visibility != View.VISIBLE) {
                 restoreStateAfterClosingInfoSheet()
+            } else if (!showNav) {
+                // If showNav is false, explicitly hide bottom navigation when returning to Edit/New Line sheets
+                hideBottomNavigation()
             }
             // If edit line is open underneath, refresh its list/counts after closing object list
             if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE) {
@@ -2691,6 +2703,11 @@ class MappingFragmentLogic(
                     if (!canClose && b.cbClosedLine.isChecked) b.cbClosedLine.isChecked = false
                     updateEditLineOverlay()
                 }
+                // Ensure bottom nav is hidden when returning to Edit Line sheet
+                hideBottomNavigation()
+            } else if (fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
+                // Ensure bottom nav is hidden when returning to New Line sheet
+                hideBottomNavigation()
             }
             onHidden?.invoke()
         }
@@ -4451,13 +4468,21 @@ class MappingFragmentLogic(
             }
         } else if (fragment.isSelectingPointForEditLine && fragment.pendingEditLineSegment != null) {
             showEditLineBottomSheet(fragment.pendingEditLineSegment!!)
+        } else if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE || fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
+            // Don't show bottom nav if Edit Line or New Line sheets are visible
+            hideBottomNavigation()
         } else {
             showBottomNavigation()
         }
     }
 
     fun hideBottomNavigation(onEnd: (() -> Unit)? = null) {
-        // Bottom nav is always visible; sheets overlap it
+        // Hide bottom navigation so sheets don't overlap it
+        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+            animate().cancel()
+            visibility = View.GONE
+            alpha = 0f
+        }
         // Only handle stakeout UI if needed
         if (fragment.currentStakeoutMode != StakeoutMode.NONE) {
             fragment.helper.hideStakeoutUI(showNav = false)
@@ -4466,7 +4491,19 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
+        // Don't show bottom nav if Edit Line or New Line sheets are visible
+        if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
+            fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
+            return
+        }
+
         // Bottom nav is always visible; just reset UI element positions
+        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+            animate().cancel()
+            visibility = View.VISIBLE
+            alpha = 1f
+        }
+
         fragment.binding.btnCollect.animate().cancel()
         fragment.binding.btnCollect.translationY = -bottomNavOffset
 
@@ -5795,15 +5832,16 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 .toList()
         staleSameCodeOverlays.forEach { fragment.binding.mapView.overlays.remove(it) }
         fragment.binding.mapView.invalidate()
+
+        // Hide bottom navigation first before hiding collect point sheet
+        hideBottomNavigation()
+
         hideCollectPointBottomSheet(finalizeSegment = false, showNav = false)
         if (!isRestoring) {
             fragment.highlightedLineOverlay?.unhighlight()
             fragment.highlightedLineOverlay = null
         }
         updateMarkersForZoom(forceRefresh = true)
-
-        // Fire and forget hide nav
-        hideBottomNavigation()
 
         // Execute Show Logic IMMEDIATELY
         val sheetBinding = fragment.binding.bottomSheetEditLine
@@ -5985,7 +6023,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             fragment.isSelectingPointForEditLine = true
             fragment.pendingEditLineSegment = ls
             // Keep edit line sheet visible underneath; slide object list above it
-            showObjectListBottomSheet(transition = BottomSheetTransition.SLIDE_UP, showAddButton = false)
+            showObjectListBottomSheetInternalForEditLine(BottomSheetTransition.SLIDE_UP)
         }
 
         sheetBinding.llCodeValue.setOnClickListener {
