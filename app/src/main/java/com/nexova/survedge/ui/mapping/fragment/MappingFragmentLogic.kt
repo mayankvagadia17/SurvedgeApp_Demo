@@ -1907,19 +1907,46 @@ class MappingFragmentLogic(
     }
 
     fun deleteLineOnlyKeepPoints(lineSegment: ClickablePolylineOverlay) {
-        // 1. Remove from completedLineOverlays
+        // 1. Get line details before removal
+        val pointsToConvert = lineSegment.labeledPoints.toList()
+        val lineCode = lineSegment.codeId
+
+        // 2. Remove from completedLineOverlays
         fragment.completedLineOverlays.remove(lineSegment)
 
-        // 2. Remove line from map overlays
+        // 3. Remove line from map overlays
         fragment.binding.mapView.overlays.remove(lineSegment)
 
-        // 3. Remove line entity from DB
+        // 4. Remove line entity from DB
         val lineEntity = collectedLines.find { it.line.id == lineSegment.codeId }?.line
         if (lineEntity != null) {
             viewModel.deleteLine(lineEntity)
         }
 
-        // 4. Update UI
+        // 5. Convert line points to individual points (remove line code)
+        pointsToConvert.forEach { labeledPoint ->
+            val pointEntity = collectedLines
+                .flatMap { it.points }
+                .find { it.id == labeledPoint.id }
+
+            if (pointEntity != null) {
+                val updatedEntity = pointEntity.copy(code = "")
+                viewModel.savePoint(updatedEntity)
+            }
+        }
+
+        // 6. Update local collectedLabeledPoints to remove line code from points
+        val pointIds = pointsToConvert.map { it.id }.toSet()
+        fragment.collectedLabeledPoints.forEach { point ->
+            if (point.id in pointIds && point.codeId == lineCode) {
+                val index = fragment.collectedLabeledPoints.indexOf(point)
+                if (index >= 0) {
+                    fragment.collectedLabeledPoints[index] = point.copy(codeId = "")
+                }
+            }
+        }
+
+        // 7. Update UI
         if (fragment.highlightedLineOverlay == lineSegment) {
             fragment.highlightedLineOverlay = null
         }
@@ -1928,6 +1955,18 @@ class MappingFragmentLogic(
         fragment.binding.mapView.invalidate()
         hideLineSegmentDetailsBottomSheet()
         refreshNextPointIdForCollectSheet()
+
+        // 8. Refresh object list if visible
+        val sheetBinding = fragment.binding.bottomSheetObjectList
+        if (sheetBinding.root.visibility == View.VISIBLE) {
+            val allItems = processCollectedPointsForObjectList()
+            val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
+                allItems.filter { it.indicatorType == IndicatorType.POINT }
+            } else {
+                allItems
+            }
+            (sheetBinding.rvObjectList.adapter as? ObjectListAdapter)?.updateItems(items.toMutableList())
+        }
 
         Toast.makeText(fragment.requireContext(), "Line deleted (Points kept)", Toast.LENGTH_SHORT).show()
     }
@@ -1970,6 +2009,18 @@ class MappingFragmentLogic(
         fragment.binding.mapView.invalidate()
         hideLineSegmentDetailsBottomSheet()
         refreshNextPointIdForCollectSheet()
+
+        // 6. Refresh object list if visible
+        val sheetBinding = fragment.binding.bottomSheetObjectList
+        if (sheetBinding.root.visibility == View.VISIBLE) {
+            val allItems = processCollectedPointsForObjectList()
+            val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
+                allItems.filter { it.indicatorType == IndicatorType.POINT }
+            } else {
+                allItems
+            }
+            (sheetBinding.rvObjectList.adapter as? ObjectListAdapter)?.updateItems(items.toMutableList())
+        }
 
         Toast.makeText(fragment.requireContext(), "Line and points deleted", Toast.LENGTH_SHORT).show()
     }
