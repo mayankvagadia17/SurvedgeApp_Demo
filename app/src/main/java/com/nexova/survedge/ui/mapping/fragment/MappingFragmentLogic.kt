@@ -1101,6 +1101,20 @@ class MappingFragmentLogic(
             })
             currentItemTouchHelper.attachToRecyclerView(sheetBinding.rvPoints)
 
+            // Keyboard Handling: Keep bottom nav hidden while sheet is open
+            sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (!sheetBinding.root.isAttachedToWindow) {
+                        sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                        return
+                    }
+                    if (sheetBinding.root.visibility != View.VISIBLE) return
+
+                    // Ensure bottom nav stays hidden while sheet is visible
+                    hideBottomNavigation()
+                }
+            })
 
             setupSwipeToDismiss(sheetBinding.root) { hideNewLineBottomSheet() }
             }
@@ -2711,6 +2725,21 @@ class MappingFragmentLogic(
                 }
             })
 
+            // Keyboard Handling: Keep bottom nav hidden while sheet is open
+            sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (!sheetBinding.root.isAttachedToWindow) {
+                        sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                        return
+                    }
+                    if (sheetBinding.root.visibility != View.VISIBLE) return
+
+                    // Ensure bottom nav stays hidden while sheet is visible
+                    hideBottomNavigation()
+                }
+            })
+
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
             // Don't enable swipe-to-dismiss for object list; only allow closing via close button
             // to prevent accidental swipes to the right when users interact with the list
@@ -3528,6 +3557,21 @@ class MappingFragmentLogic(
                 sheetBinding.vfCodeManager.setOutAnimation(fragment.requireContext(), R.anim.slide_out_left)
                 sheetBinding.vfCodeManager.showNext()
             }
+
+            // Keyboard Handling: Keep bottom nav hidden while sheet is open
+            sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (!sheetBinding.root.isAttachedToWindow) {
+                        sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                        return
+                    }
+                    if (sheetBinding.root.visibility != View.VISIBLE) return
+
+                    // Ensure bottom nav stays hidden while sheet is visible
+                    hideBottomNavigation()
+                }
+            })
 
             setupSwipeToDismiss(sheetBinding.root) { hideSelectCodeBottomSheet(showNav = shouldShowNavOnClose, previousSheet = previousSheet) }
             }
@@ -6368,6 +6412,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                         fragment.binding.mapView.setOnTouchListener(null)
                         fragment.binding.llMapsButtons.visibility = View.VISIBLE
                     }
+                    // Ensure bottom nav stays hidden while sheet is visible (keyboard closed)
+                    hideBottomNavigation()
                 }
             }
         })
@@ -6542,6 +6588,21 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             }
 
             sheetBinding.root.visibility = View.VISIBLE
+
+            // Keyboard Handling: Keep bottom nav hidden while sheet is open
+            sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (!sheetBinding.root.isAttachedToWindow) {
+                        sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                        return
+                    }
+                    if (sheetBinding.root.visibility != View.VISIBLE) return
+
+                    // Ensure bottom nav stays hidden while sheet is visible
+                    hideBottomNavigation()
+                }
+            })
 
             // Disable map touch and hide map buttons when new point sheet is open
             fragment.binding.mapView.setMultiTouchControls(false)
@@ -7152,6 +7213,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             // Show map buttons when keyboard is closed
                             fragment.binding.llMapsButtons.visibility = View.VISIBLE
                         }
+                        // Ensure bottom nav stays hidden while sheet is visible (keyboard closed)
+                        hideBottomNavigation()
                     }
                 }
             })
