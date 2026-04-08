@@ -2946,16 +2946,12 @@ class MappingFragmentLogic(
 
                 setupSwipeGestureForDataCollectionSettings(sheetBinding.scrollContent, sheetBinding)
 
-                // Keyboard Handling: Expand to full screen when keyboard shows
+                // Keyboard Handling: Keep bottom nav hidden while sheet is open
                 collectSheetLayoutListener?.let {
                     sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(it)
                 }
                 val listener = object :
                     ViewTreeObserver.OnGlobalLayoutListener {
-                    private var wasOpened = false
-                    private var initialHeight = 0
-                    private var wasSettingsVisibleBeforeKeyboard = false
-
                     override fun onGlobalLayout() {
                         if (!sheetBinding.root.isAttachedToWindow) {
                             sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
@@ -2964,74 +2960,8 @@ class MappingFragmentLogic(
                         }
                         if (sheetBinding.root.visibility != View.VISIBLE) return
 
-                        val r = Rect()
-                        sheetBinding.root.getWindowVisibleDisplayFrame(r)
-                        val screenHeight = sheetBinding.root.rootView.height
-                        val keypadHeight = screenHeight - r.bottom
-
-                        if (keypadHeight > screenHeight * 0.15) { // Keyboard is open
-                            if (!wasOpened) {
-                                if (initialHeight == 0) initialHeight = sheetBinding.root.height
-                                wasSettingsVisibleBeforeKeyboard =
-                                    sheetBinding.llDataCollectionSettings.visibility == View.VISIBLE
-                                applyFullScreenConstraints(sheetBinding.root)
-
-                                // Unpin button from bottom and pin it to the bottom of the scroll content
-                                val btnParams =
-                                    sheetBinding.llButtonContainer.layoutParams as ConstraintLayout.LayoutParams
-                                btnParams.bottomToBottom = ConstraintLayout.LayoutParams.UNSET
-                                btnParams.topToBottom = sheetBinding.scrollContent.id
-                                sheetBinding.llButtonContainer.layoutParams = btnParams
-
-                                sheetBinding.llDataCollectionSettings.visibility = View.VISIBLE
-                                sheetBinding.root.requestLayout()
-                                wasOpened = true
-
-                                // Disable map touch when keyboard is open
-                                fragment.binding.mapView.setMultiTouchControls(false)
-                                fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>().forEach { it.isEnabled = false }
-                                fragment.binding.mapView.setOnTouchListener { _, _ -> true }
-                                // Hide map buttons when keyboard is open
-                                fragment.binding.llMapsButtons.visibility = View.GONE
-                            }
-                        } else { // Keyboard is closed
-                            if (wasOpened) {
-                                val currentParams =
-                                    sheetBinding.root.layoutParams as ConstraintLayout.LayoutParams
-                                if (currentParams.height == 0 && currentParams.topToTop == ConstraintLayout.LayoutParams.PARENT_ID) {
-                                    currentParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
-                                    currentParams.topToTop = ConstraintLayout.LayoutParams.UNSET
-                                    currentParams.topMargin = 0
-                                    sheetBinding.root.layoutParams = currentParams
-
-                                    // Restore original constraints
-                                    val btnParams =
-                                        sheetBinding.llButtonContainer.layoutParams as ConstraintLayout.LayoutParams
-                                    btnParams.topToBottom = ConstraintLayout.LayoutParams.UNSET
-                                    btnParams.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-                                    sheetBinding.llButtonContainer.layoutParams = btnParams
-
-                                    // Restore visibility based on pre-keyboard state
-                                    sheetBinding.llDataCollectionSettings.visibility =
-                                        if (wasSettingsVisibleBeforeKeyboard) View.VISIBLE else View.GONE
-
-                                    sheetBinding.root.requestLayout()
-
-                                    // Clear focus to dismiss floating text selection menus
-                                    sheetBinding.root.clearFocus()
-                                }
-                                wasOpened = false
-
-                                // Re-enable map touch when keyboard is closed
-                                fragment.binding.mapView.setMultiTouchControls(true)
-                                fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>().forEach { it.isEnabled = true }
-                                fragment.binding.mapView.setOnTouchListener(null)
-                                // Show map buttons when keyboard is closed
-                                fragment.binding.llMapsButtons.visibility = View.VISIBLE
-                                // Ensure bottom nav remains hidden since bottom sheet is still open
-                                hideBottomNavigation()
-                            }
-                        }
+                        // Ensure bottom nav stays hidden while sheet is visible
+                        hideBottomNavigation()
                     }
                 }
                 collectSheetLayoutListener = listener
