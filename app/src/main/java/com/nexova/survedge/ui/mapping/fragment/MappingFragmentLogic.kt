@@ -120,6 +120,7 @@ class MappingFragmentLogic(
 
     private val sheetNavigationStack = ArrayDeque<Pair<SheetType, () -> Unit>>()
     var currentActiveSheet = SheetType.NONE
+    private var isNavHidden = false
 
     enum class BottomSheetTransition {
         SLIDE_UP,
@@ -153,12 +154,14 @@ class MappingFragmentLogic(
                 }
             }
         } else if (outgoing != null) {
-            // Show navigation when sheet closes
-            (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
-                animate().cancel()
-                visibility = View.VISIBLE
-                alpha = 1f
-                translationY = 0f
+            if (!isNavHidden) {
+                // Show navigation when sheet closes (only if nav isn't explicitly hidden)
+                (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                    animate().cancel()
+                    visibility = View.VISIBLE
+                    alpha = 1f
+                    translationY = 0f
+                }
             }
         }
 
@@ -522,10 +525,22 @@ class MappingFragmentLogic(
 
     fun setupEdgeToEdgeInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(fragment.binding.root) { _, insets ->
+            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             statusBarHeight = systemBars.top
             val navBarHeight = systemBars.bottom
             val density = fragment.resources.displayMetrics.density
+
+            // If keyboard is visible and a sheet is open, don't update nav visibility
+            val isSheetOpen = fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
+                    fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
+                    fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
+                    fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE
+
+            if ((imeVisible || isNavHidden) && isSheetOpen) {
+                // Keyboard is showing with a sheet open, or nav was explicitly hidden - don't show nav
+                return@setOnApplyWindowInsetsListener insets
+            }
 
             // Calculate total offset needed to clear Bottom Nav
             // Use actual BNV height if measured, else standard 80dp (M3) + system bars
@@ -580,15 +595,18 @@ class MappingFragmentLogic(
             }
 
             // Apply this offset to the bottom sheet if it's supposed to be visible above the nav bar
-            fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                bottomMargin = bottomNavOffset.toInt()
+            // But NOT if a sheet is actively open (which would have already called hideBottomNavigation)
+            if (!isSheetOpen) {
+                fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                    bottomMargin = bottomNavOffset.toInt()
+                }
             }
 
             // Initial State: If BNV is visible (default), push btnCollect up
             // We use post to ensure view layout is ready/checked
             fragment.binding.root.post {
                 val nav = (fragment.activity as? MainActivity)?.binding?.bottomNavigationView
-                if (nav != null && nav.visibility == View.VISIBLE) {
+                if (nav != null && nav.visibility == View.VISIBLE && !isSheetOpen) {
                     fragment.binding.btnCollect.translationY = -bottomNavOffset
                 }
             }
@@ -3010,6 +3028,8 @@ class MappingFragmentLogic(
                                 fragment.binding.mapView.setOnTouchListener(null)
                                 // Show map buttons when keyboard is closed
                                 fragment.binding.llMapsButtons.visibility = View.VISIBLE
+                                // Ensure bottom nav remains hidden since bottom sheet is still open
+                                hideBottomNavigation()
                             }
                         }
                     }
@@ -4583,6 +4603,7 @@ class MappingFragmentLogic(
     }
 
     fun hideBottomNavigation(onEnd: (() -> Unit)? = null) {
+        isNavHidden = true
         // Hide bottom navigation so sheets don't overlap it
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
             animate().cancel()
@@ -4597,12 +4618,17 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
-        // Don't show bottom nav if Edit Line or New Line sheets are visible
-        if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
-            fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
+        // Don't show bottom nav if any input sheets are visible
+        val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE
+
+        if (isSheetOpen && !force) {
             return
         }
 
+        isNavHidden = false
         // Bottom nav is always visible; just reset UI element positions
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
             animate().cancel()
@@ -4617,7 +4643,7 @@ class MappingFragmentLogic(
         fragment.binding.llMapsButtons.translationY = 0f
 
         // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin to float above nav
-        if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
+        if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE && !isSheetOpen) {
             fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
                 bottomMargin = bottomNavOffset.toInt()
             }
