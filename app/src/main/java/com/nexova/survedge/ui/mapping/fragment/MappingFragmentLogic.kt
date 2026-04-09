@@ -2208,9 +2208,10 @@ class MappingFragmentLogic(
     }
 
     fun handleLineSegmentClick(clickedPolyline: ClickablePolylineOverlay) {
-        // Block all map interactions when Select Code or Collect Point sheets are open
+        // Block all map interactions when Select Code, Collect Point, or New Line sheets are open
         if (fragment.binding.bottomSheetSelectCode.root.visibility == View.VISIBLE ||
-            fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE) {
+            fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
+            fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
             return
         }
 
@@ -4592,6 +4593,7 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
+        isNavHidden = false
         // Don't show bottom nav if any input sheets are visible
         val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
@@ -4601,8 +4603,6 @@ class MappingFragmentLogic(
         if (isSheetOpen && !force) {
             return
         }
-
-        isNavHidden = false
         // Bottom nav is always visible; just reset UI element positions
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
             animate().cancel()
