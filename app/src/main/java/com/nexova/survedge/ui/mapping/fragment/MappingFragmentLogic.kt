@@ -121,7 +121,6 @@ class MappingFragmentLogic(
     private val sheetNavigationStack = ArrayDeque<Pair<SheetType, () -> Unit>>()
     var currentActiveSheet = SheetType.NONE
     private var isNavHidden = false
-    private var openSheetCount = 0  // Track number of open sheets for nav visibility
 
     enum class BottomSheetTransition {
         SLIDE_UP,
@@ -257,12 +256,6 @@ class MappingFragmentLogic(
         val incomingView = getBindingRootForType(type)
 
         onSetup?.invoke()
-
-        // Register sheet open: increment counter and hide nav
-        if (outgoing == SheetType.NONE) {
-            registerSheetOpen()
-        }
-
         animateSheetTransition(outgoingView, incomingView, transition)
     }
 
@@ -290,25 +283,7 @@ class MappingFragmentLogic(
         sheetNavigationStack.clear()
     }
 
-    private fun registerSheetOpen() {
-        openSheetCount++
-        if (openSheetCount > 0) {
-            hideBottomNavigation()
-        }
-    }
-
-    private fun registerSheetClose() {
-        openSheetCount--
-        if (openSheetCount <= 0) {
-            openSheetCount = 0
-            showBottomNavigation(force = true)
-        }
-    }
-
     fun hideAllSheets(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN, onEnd: (() -> Unit)? = null) {
-        if (currentActiveSheet != SheetType.NONE) {
-            registerSheetClose()
-        }
         val outgoingView = getBindingRootForType(currentActiveSheet)
         sheetNavigationStack.clear()
         currentActiveSheet = SheetType.NONE
@@ -4618,9 +4593,14 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
-        // If force=true, always show (used by centralized sheet management)
-        // Otherwise, only show if no sheets are open
-        if (!force && openSheetCount > 0) {
+        // Don't show bottom nav if any input sheets are visible
+        val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE
+
+        if (isSheetOpen && !force) {
             return
         }
         isNavHidden = false
@@ -4638,7 +4618,7 @@ class MappingFragmentLogic(
         fragment.binding.llMapsButtons.translationY = 0f
 
         // If Bottom Sheet Line Segment is VISIBLE, ensure it has the margin to float above nav
-        if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE && openSheetCount == 0) {
+        if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE && !isSheetOpen) {
             fragment.binding.bottomSheetLineSegment.root.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
                 bottomMargin = bottomNavOffset.toInt()
             }
