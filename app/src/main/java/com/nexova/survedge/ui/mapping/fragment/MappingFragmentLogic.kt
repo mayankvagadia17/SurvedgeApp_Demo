@@ -112,6 +112,7 @@ class MappingFragmentLogic(
     private var isEditLineSaved = false
     private var selectCodeSearchWatcher: TextWatcher? = null
     private var collectSheetLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var editLineLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     // --- New Sheet Management System ---
     enum class SheetType {
@@ -154,14 +155,13 @@ class MappingFragmentLogic(
                 }
             }
         } else if (outgoing != null) {
-            if (!isNavHidden) {
-                // Show navigation when sheet closes (only if nav isn't explicitly hidden)
-                (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
-                    animate().cancel()
-                    visibility = View.VISIBLE
-                    alpha = 1f
-                    translationY = 0f
-                }
+            // Show navigation when sheet closes
+            isNavHidden = false
+            (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                animate().cancel()
+                visibility = View.VISIBLE
+                alpha = 1f
+                translationY = 0f
             }
         }
 
@@ -3317,6 +3317,10 @@ class MappingFragmentLogic(
         }
         adjustMapsButtonsForBottomSheet(closingView = fragment.binding.bottomSheetCollectPoint.root)
 
+        collectSheetLayoutListener?.let {
+            fragment.binding.bottomSheetCollectPoint.root.viewTreeObserver.removeOnGlobalLayoutListener(it)
+        }
+        collectSheetLayoutListener = null
         animateSheetTransition(fragment.binding.bottomSheetCollectPoint.root, null, transition) {
             if (showNav) restoreStateAfterClosingInfoSheet()
             onHidden?.invoke()
@@ -4569,9 +4573,6 @@ class MappingFragmentLogic(
             }
         } else if (fragment.isSelectingPointForEditLine && fragment.pendingEditLineSegment != null) {
             showEditLineBottomSheet(fragment.pendingEditLineSegment!!)
-        } else if (fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE || fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE) {
-            // Don't show bottom nav if Edit Line or New Line sheets are visible
-            hideBottomNavigation()
         } else {
             showBottomNavigation()
         }
@@ -4593,12 +4594,12 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
-        // Don't show bottom nav if any input sheets are visible
+        // Don't show bottom nav if any INPUT sheets are visible
+        // LineSegment is info-only, not an input sheet, so nav can show while it's open
         val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
-                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE ||
-                fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE
+                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE
 
         if (isSheetOpen && !force) {
             return
@@ -6344,7 +6345,10 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         setupSwipeGestureForEditLine(sheetBinding.root, sheetBinding)
 
         // Keyboard Handling: Expand to full screen when keyboard shows (like collect point)
-        sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+        editLineLayoutListener?.let {
+            sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(it)
+        }
+        val listener = object :
             ViewTreeObserver.OnGlobalLayoutListener {
             private var wasOpened = false
             private var savedHeight = 0
@@ -6352,6 +6356,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             override fun onGlobalLayout() {
                 if (!sheetBinding.root.isAttachedToWindow) {
                     sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    editLineLayoutListener = null
                     return
                 }
 
@@ -6417,7 +6422,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     hideBottomNavigation()
                 }
             }
-        })
+        }
+        editLineLayoutListener = listener
+        sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(listener)
 
         // Do NOT adjust sidebar for edit line sheet - sidebar should stay in place
     }
@@ -6477,6 +6484,10 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
 
         val root = fragment.binding.bottomSheetEditLine.root
+        editLineLayoutListener?.let {
+            root.viewTreeObserver.removeOnGlobalLayoutListener(it)
+        }
+        editLineLayoutListener = null
         animateSheetTransition(root, null, transition) {
             if (!fragment.isSelectingPointForEditLine) {
                 val originalLine = fragment.pendingEditLineSegment
@@ -6502,6 +6513,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             if (fragment.binding.bottomSheetCollectPoint.root.visibility == View.GONE && fragment.currentLineCodeId != null && fragment.selectedPointIndicatorType == IndicatorType.LINE) {
                 showCollectPointBottomSheet()
             } else if (showNav) {
+                isNavHidden = false
                 restoreStateAfterClosingInfoSheet()
             }
             onHidden?.invoke()

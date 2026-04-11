@@ -7,7 +7,8 @@
       "Bash(./gradlew :app:compileDebugKotlin)",
       "Bash(./gradlew app:compileDebugKotlin)",
       "Bash(grep -l \"EditText\\\\|etNote\\\\|etPointId\\\\|etSearch\\\\|etLineName\" /Users/amanvagadiya/Documents/GitHub/Android/SurvedgeApp_Demo/app/src/main/res/layout/bottom_sheet*.xml)",
-      "Bash(kotlinc -no-stdlib app/src/main/java/com/nexova/survedge/ui/mapping/fragment/MappingFragmentLogic.kt)"
+      "Bash(kotlinc -no-stdlib app/src/main/java/com/nexova/survedge/ui/mapping/fragment/MappingFragmentLogic.kt)",
+      "Bash(git commit -m ':*)"
     ]
   }
 }
