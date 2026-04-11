@@ -6498,7 +6498,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             isEditLineSaved = false
             updateMarkersForZoom(forceRefresh = true)
             fragment.binding.mapView.invalidate()
-            if (fragment.binding.bottomSheetCollectPoint.root.visibility == View.GONE && fragment.currentLineCodeId != null) {
+            if (fragment.binding.bottomSheetCollectPoint.root.visibility == View.GONE && fragment.currentLineCodeId != null && fragment.selectedPointIndicatorType == IndicatorType.LINE) {
                 showCollectPointBottomSheet()
             } else if (showNav) {
                 restoreStateAfterClosingInfoSheet()
