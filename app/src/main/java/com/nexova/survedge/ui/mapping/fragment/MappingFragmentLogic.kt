@@ -4597,7 +4597,8 @@ class MappingFragmentLogic(
         val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
-                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE
+                fragment.binding.bottomSheetNewPoint.root.visibility == View.VISIBLE ||
+                fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE
 
         if (isSheetOpen && !force) {
             return
