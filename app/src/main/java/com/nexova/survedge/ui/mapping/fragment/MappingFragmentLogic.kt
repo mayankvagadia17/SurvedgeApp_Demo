@@ -4593,7 +4593,6 @@ class MappingFragmentLogic(
     }
 
     fun showBottomNavigation(force: Boolean = false) {
-        isNavHidden = false
         // Don't show bottom nav if any input sheets are visible
         val isSheetOpen = fragment.binding.bottomSheetEditLine.root.visibility == View.VISIBLE ||
                 fragment.binding.bottomSheetNewLine.root.visibility == View.VISIBLE ||
@@ -4603,6 +4602,7 @@ class MappingFragmentLogic(
         if (isSheetOpen && !force) {
             return
         }
+        isNavHidden = false
         // Bottom nav is always visible; just reset UI element positions
         (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
             animate().cancel()
