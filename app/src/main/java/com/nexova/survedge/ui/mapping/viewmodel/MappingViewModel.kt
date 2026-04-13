@@ -9,6 +9,7 @@ import com.nexova.survedge.data.db.entity.LinePointCrossRef
 import com.nexova.survedge.data.db.entity.LineWithPoints
 import com.nexova.survedge.data.db.entity.PointEntity
 import com.nexova.survedge.data.db.entity.ProjectEntity
+import com.nexova.survedge.ui.mapping.sheet.MappingSheetState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,7 +29,19 @@ class MappingViewModel(application: Application) : AndroidViewModel(application)
     private val lineDao = db.lineDao()
     private val projectDao = db.projectDao()
 
-    // Currently active project ID. 
+    // Bottom sheet state
+    private val _sheetState = MutableStateFlow<MappingSheetState>(MappingSheetState.None)
+    val sheetState: StateFlow<MappingSheetState> = _sheetState.asStateFlow()
+
+    fun setSheetState(state: MappingSheetState) {
+        _sheetState.value = state
+    }
+
+    fun dismissSheet() {
+        _sheetState.value = MappingSheetState.None
+    }
+
+    // Currently active project ID.
     // TODO: persist this in SharedPreferences/DataStore. For now, default to a dummy or first project.
     private val _currentProjectId = MutableStateFlow<Long?>(null)
     val currentProjectId = _currentProjectId.asStateFlow()

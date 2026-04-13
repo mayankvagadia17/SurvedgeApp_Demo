@@ -34,6 +34,8 @@ import androidx.lifecycle.lifecycleScope
 import com.nexova.survedge.ui.mapping.viewmodel.MappingViewModel
 import kotlinx.coroutines.launch
 import com.nexova.survedge.ui.mapping.mapper.toLabeledPoint
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nexova.survedge.ui.mapping.sheet.MappingSheetsHost
 
 class MappingFragment : Fragment() {
 
@@ -158,10 +160,19 @@ class MappingFragment : Fragment() {
         setupCompassOrientation()
         preventDoubleTapZoomOnNonMapViews()
         setupPointClickHandler()
-        
+
         // Stakeout initialization
         logic.setupStakeoutMode()
         helper.setupStakeoutUI()
+
+        // Setup Compose sheets overlay
+        binding.composeSheetsOverlay.setContent {
+            val sheetState = viewModel.sheetState.collectAsStateWithLifecycle().value
+            MappingSheetsHost(
+                state = sheetState,
+                onDismiss = { logic.hideAllSheets() }
+            )
+        }
 
         binding.imgBack.setOnClickListener {
             requireActivity().onBackPressed()

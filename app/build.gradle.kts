@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -38,6 +39,10 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        compose = true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
     }
 }
 
@@ -60,7 +65,7 @@ dependencies {
     implementation(libs.sdp.android)
     implementation(libs.ssp.android)
 
-// osmdroid for OpenStreetMap
+    // osmdroid for OpenStreetMap
     implementation(libs.osmdroid.android)
 
     // Google Play Services Location for real-time location tracking
@@ -71,4 +76,16 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.google.code.gson)
+
+    // Jetpack Compose
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.lifecycle.runtime.compose)
+    debugImplementation(libs.compose.ui.tooling)
+
+    // Accompanist Pager for HorizontalPager
+    implementation(libs.accompanist.pager)
+    implementation(libs.accompanist.pager.indicators)
 }

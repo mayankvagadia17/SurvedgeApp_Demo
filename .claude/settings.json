@@ -10,7 +10,8 @@
       "Bash(kotlinc -no-stdlib app/src/main/java/com/nexova/survedge/ui/mapping/fragment/MappingFragmentLogic.kt)",
       "Bash(git commit -m ':*)",
       "Bash(grep -E \"\\\\.xml$\")",
-      "Bash(wait 4621)"
+      "Bash(wait 4621)",
+      "Bash(./gradlew compileDebugKotlin --no-daemon)"
     ]
   }
 }
