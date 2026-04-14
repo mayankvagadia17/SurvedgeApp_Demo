@@ -1297,6 +1297,12 @@ class MappingFragmentLogic(
             updateMarkersForZoom()
         }
 
+        // Check if point is already added to the line
+        if (fragment.newLinePoints.any { it.id == point.id }) {
+            // Point already exists in the line, don't add it again
+            return
+        }
+
         // STEAL POINT from existing lines
         val inheritedCode = transferPointToCurrentLine(point)
 
@@ -1452,8 +1458,8 @@ class MappingFragmentLogic(
         val adapter = fragment.currentEditLineAdapter
         if (adapter != null) {
             val currentPoints = adapter.getPoints()
-            // Prevent duplicate adjacent points?
-            if (currentPoints.isNotEmpty() && currentPoints.last().id == point.id) return
+            // Prevent duplicate points (already in the line)
+            if (currentPoints.any { it.id == point.id }) return
 
             // Prevent adding points that are already part of another line (consistent with Add Line)
             val currentLine = fragment.pendingEditLineSegment
