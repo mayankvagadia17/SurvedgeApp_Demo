@@ -69,6 +69,12 @@ fun LineSegmentSheet(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Edit Line")
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(onClick = { state.onLineStakeout() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Stakeout Line")
+                }
             } else if (state.point != null) {
                 Text("Point ID", style = MaterialTheme.typography.labelMedium)
                 Text(state.point.id, style = MaterialTheme.typography.bodyMedium)

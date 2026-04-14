@@ -2379,16 +2379,6 @@ class MappingFragmentLogic(
 
             sheetBinding.btnStakeout.setSwipeSafeClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
-                val points = lineSegment.labeledPoints.map {
-                    StakeoutPoint(
-                        id = it.id,
-                        name = it.codeId,
-                        latitude = it.geoPoint.latitude,
-                        longitude = it.geoPoint.longitude,
-                        elevation = it.elevation,
-                        isLine = true // From lineSegment, so it's a line
-                    )
-                }
 
                 // Manually clear selection state without triggering bottom nav show
                 fragment.highlightedLineOverlay?.unhighlight()
@@ -2398,7 +2388,7 @@ class MappingFragmentLogic(
 
                 fragment.restoreLineSegmentAfterStakeout = lineSegment
                 hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
-                startStakeoutSession(points)
+                startLineStakeoutSession(lineSegment)
             }
 
             sheetBinding.root.visibility = View.VISIBLE
@@ -4869,7 +4859,12 @@ class MappingFragmentLogic(
                     // Stakeout Update - Handled in smoothMoveToTarget for sync
                     if (fragment.stakeoutSession != null && fragment.isFirstLocationUpdate) {
                         // Fallback for first update or if not animating
-                        updateStakeoutMeasurements(it.latitude, it.longitude, it.altitude)
+                        val lineOverlay = fragment.lineStakeoutOverlay
+                        if (lineOverlay != null) {
+                            updateLineStakeoutMeasurements(it.latitude, it.longitude, it.altitude, lineOverlay)
+                        } else {
+                            updateStakeoutMeasurements(it.latitude, it.longitude, it.altitude)
+                        }
                     }
                     // Mock GNSS Status for now or extract from extras if available
 
@@ -6915,6 +6910,173 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         fragment.currentLocation?.let { loc ->
             updateStakeoutMeasurements(loc.latitude, loc.longitude, loc.altitude)
         }
+    }
+
+    fun startLineStakeoutSession(lineOverlay: com.nexova.survedge.ui.mapping.overlay.ClickablePolylineOverlay) {
+        if (lineOverlay.actualPoints.isEmpty()) return
+
+        val referencePoint = StakeoutPoint(
+            id = lineOverlay.codeId,
+            name = lineOverlay.codeId,
+            latitude = lineOverlay.actualPoints[0].latitude,
+            longitude = lineOverlay.actualPoints[0].longitude,
+            elevation = lineOverlay.labeledPoints.getOrNull(0)?.elevation ?: 0.0,
+            isLine = true
+        )
+
+        fragment.stakeoutSession = StakeoutSession(
+            id = java.util.UUID.randomUUID().toString(),
+            targetPoints = listOf(referencePoint),
+            currentIndex = 0
+        )
+
+        fragment.currentStakeoutMode = StakeoutMode.MAP_NAVIGATION
+        fragment.lineStakeoutOverlay = lineOverlay
+        fragment.lineCenterPoint = calculateLineCenterPoint(lineOverlay.actualPoints)
+        fragment.helper.showStakeoutUI()
+
+        fragment.currentLocation?.let { loc ->
+            updateLineStakeoutMeasurements(loc.latitude, loc.longitude, loc.altitude, lineOverlay)
+        }
+    }
+
+    fun updateLineStakeoutMeasurements(lat: Double, lon: Double, alt: Double, lineOverlay: com.nexova.survedge.ui.mapping.overlay.ClickablePolylineOverlay) {
+        val session = fragment.stakeoutSession ?: return
+        val userPoint = org.osmdroid.util.GeoPoint(lat, lon)
+
+        var closestDistance = Double.MAX_VALUE
+        var closestPoint = lineOverlay.actualPoints[0]
+        var closestSegmentIndex = 0
+
+        val actualPoints = lineOverlay.actualPoints
+
+        for (i in 0 until actualPoints.size - 1) {
+            val p1 = actualPoints[i]
+            val p2 = actualPoints[i + 1]
+
+            val closestOnSegment = getClosestPointOnLineSegment(userPoint, p1, p2)
+            val distance = calculateHaversineDistance(lat, lon, closestOnSegment.latitude, closestOnSegment.longitude)
+
+            if (distance < closestDistance) {
+                closestDistance = distance
+                closestPoint = closestOnSegment
+                closestSegmentIndex = i
+            }
+        }
+
+        val bearing = com.nexova.survedge.ui.stakeout.util.CoordinateUtils.calculateBearing(lat, lon, closestPoint.latitude, closestPoint.longitude)
+        val northOffset = calculateNorthOffset(lat, lon, closestPoint.latitude, closestPoint.longitude)
+        val eastOffset = calculateEastOffset(lat, lon, closestPoint.latitude, closestPoint.longitude)
+        val verticalDistance = alt - (lineOverlay.labeledPoints.getOrNull(0)?.elevation ?: 0.0)
+
+        val measurement = com.nexova.survedge.ui.stakeout.model.StakeoutMeasurement(
+            targetPointId = lineOverlay.codeId,
+            horizontalDistance = closestDistance,
+            verticalDistance = verticalDistance,
+            northOffset = northOffset,
+            eastOffset = eastOffset,
+            bearing = bearing,
+            inTolerance = closestDistance <= 0.05
+        )
+
+        fragment.helper.updateStakeoutBottomSheet(measurement)
+
+        if (closestDistance <= 0.5) {
+            fragment.currentStakeoutMode = StakeoutMode.BULLSEYE_PRECISION
+            fragment.helper.showBullseyeView()
+        } else {
+            fragment.currentStakeoutMode = StakeoutMode.MAP_NAVIGATION
+            fragment.helper.hideBullseyeView()
+        }
+
+        updateConnectionLineForLineStakeout(userPoint, closestPoint)
+    }
+
+    private fun getClosestPointOnLineSegment(point: org.osmdroid.util.GeoPoint, p1: org.osmdroid.util.GeoPoint, p2: org.osmdroid.util.GeoPoint): org.osmdroid.util.GeoPoint {
+        val lat1 = Math.toRadians(p1.latitude)
+        val lon1 = Math.toRadians(p1.longitude)
+        val lat2 = Math.toRadians(p2.latitude)
+        val lon2 = Math.toRadians(p2.longitude)
+        val lat = Math.toRadians(point.latitude)
+        val lon = Math.toRadians(point.longitude)
+
+        val dLon = lon2 - lon1
+        val y = Math.sin(dLon) * Math.cos(lat2)
+        val x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+        val bearing1 = Math.atan2(y, x)
+
+        val lat3 = Math.asin(Math.sin(lat1) * Math.cos(1.0) + Math.cos(lat1) * Math.sin(1.0) * Math.cos(bearing1))
+        val lon3 = lon1 + Math.atan2(Math.sin(bearing1) * Math.sin(1.0) * Math.cos(lat1), Math.cos(1.0) - Math.sin(lat1) * Math.sin(lat3))
+
+        val latClosest = Math.toDegrees(lat3)
+        val lonClosest = Math.toDegrees(lon3)
+
+        return org.osmdroid.util.GeoPoint(latClosest, lonClosest)
+    }
+
+    private fun updateConnectionLineForLineStakeout(userPoint: org.osmdroid.util.GeoPoint, closestPoint: org.osmdroid.util.GeoPoint) {
+        val existingLine = fragment.connectionLineOverlay
+        if (existingLine != null) {
+            fragment.binding.mapView.overlays.remove(existingLine)
+        }
+
+        val lineCenterPoint = fragment.lineCenterPoint
+        val targetPoint = if (lineCenterPoint != null) {
+            org.osmdroid.util.GeoPoint(lineCenterPoint.first, lineCenterPoint.second)
+        } else {
+            closestPoint
+        }
+
+        val connectionLine = org.osmdroid.views.overlay.Polyline()
+        connectionLine.setPoints(listOf(userPoint, targetPoint))
+        connectionLine.color = android.graphics.Color.parseColor("#FF6B6B")
+        connectionLine.width = 3f
+        connectionLine.isGeodesic = true
+        connectionLine.paint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 10f), 0f)
+
+        fragment.binding.mapView.overlays.add(connectionLine)
+        fragment.connectionLineOverlay = connectionLine
+        fragment.binding.mapView.invalidate()
+    }
+
+    private fun calculateHaversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        val c = 2 * Math.asin(Math.sqrt(a))
+        return R * c
+    }
+
+    private fun calculateNorthOffset(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val distance = calculateHaversineDistance(lat1, lon1, lat2, lon2)
+        val bearing = com.nexova.survedge.ui.stakeout.util.CoordinateUtils.calculateBearing(lat1, lon1, lat2, lon2)
+        return Math.cos(Math.toRadians(bearing)) * distance
+    }
+
+    private fun calculateEastOffset(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val distance = calculateHaversineDistance(lat1, lon1, lat2, lon2)
+        val bearing = com.nexova.survedge.ui.stakeout.util.CoordinateUtils.calculateBearing(lat1, lon1, lat2, lon2)
+        return Math.sin(Math.toRadians(bearing)) * distance
+    }
+
+    private fun calculateLineCenterPoint(points: List<org.osmdroid.util.GeoPoint>): Pair<Double, Double> {
+        if (points.isEmpty()) return Pair(0.0, 0.0)
+
+        var totalLat = 0.0
+        var totalLon = 0.0
+
+        for (point in points) {
+            totalLat += point.latitude
+            totalLon += point.longitude
+        }
+
+        return Pair(
+            totalLat / points.size,
+            totalLon / points.size
+        )
     }
 
     fun stopStakeoutSession() {

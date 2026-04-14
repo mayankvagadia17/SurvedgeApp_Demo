@@ -121,6 +121,8 @@ class MappingFragment : Fragment() {
     internal var autoFollowHandler: Handler? = null
     internal var previousStakeoutSheet: MappingFragmentLogic.SheetType? = null
     internal var currentCoordinateSystem: CoordinateSystem = CoordinateSystem.LOCAL // Default to Local based on previous "m E" texts
+    internal var lineStakeoutOverlay: com.nexova.survedge.ui.mapping.overlay.ClickablePolylineOverlay? = null
+    internal var lineCenterPoint: Pair<Double, Double>? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,

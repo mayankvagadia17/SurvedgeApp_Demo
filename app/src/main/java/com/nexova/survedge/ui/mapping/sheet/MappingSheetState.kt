@@ -24,6 +24,7 @@ sealed class MappingSheetState {
         val onEdit: () -> Unit = {},
         val onDelete: () -> Unit = {},
         val onStakeout: () -> Unit = {},
+        val onLineStakeout: () -> Unit = {},
         val onContinueCollect: () -> Unit = {},
         val onClose: () -> Unit = {}
     ) : MappingSheetState()
@@ -87,6 +88,18 @@ sealed class MappingSheetState {
 
     data class Stakeout(
         val targetPoint: LabeledPoint? = null,
+        val northSouth: Double = 0.0,
+        val eastWest: Double = 0.0,
+        val cutFill: Double = 0.0,
+        val distance: Double = 0.0,
+        val azimuth: Double = 0.0,
+        val inTolerance: Boolean = false,
+        val onClose: () -> Unit = {}
+    ) : MappingSheetState()
+
+    data class LineStakeout(
+        val lineCode: String = "",
+        val lineName: String = "",
         val northSouth: Double = 0.0,
         val eastWest: Double = 0.0,
         val cutFill: Double = 0.0,

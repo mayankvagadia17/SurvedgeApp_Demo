@@ -20,6 +20,7 @@ fun MappingSheetsHost(
             is MappingSheetState.SelectCode -> SelectCodeSheet(state, onDismiss)
             is MappingSheetState.ObjectList -> ObjectListSheet(state, onDismiss)
             is MappingSheetState.Stakeout -> StakeoutSheet(state, onDismiss)
+            is MappingSheetState.LineStakeout -> LineStakeoutSheet(state, onDismiss)
             is MappingSheetState.ConfirmDialog -> ConfirmDialogSheet(state, onDismiss)
             is MappingSheetState.DeleteLineOptions -> DeleteLineOptionsSheet(state, onDismiss)
             is MappingSheetState.NewProject -> NewProjectSheet(state, onDismiss)
