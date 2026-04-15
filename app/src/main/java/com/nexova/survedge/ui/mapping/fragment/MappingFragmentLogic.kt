@@ -57,6 +57,7 @@ import com.nexova.survedge.databinding.BottomSheetCollectPointBinding
 import com.nexova.survedge.databinding.BottomSheetConfirmDialogBinding
 import com.nexova.survedge.databinding.BottomSheetEditLineBinding
 import com.nexova.survedge.databinding.BottomSheetLineSegmentBinding
+import com.nexova.survedge.databinding.BottomSheetNewLineBinding
 import com.nexova.survedge.databinding.BottomSheetObjectListBinding
 import com.nexova.survedge.databinding.BottomSheetSelectCodeBinding
 import com.nexova.survedge.ui.main.activity.MainActivity
@@ -936,7 +937,6 @@ class MappingFragmentLogic(
             sheetBinding.cbClosedLine.isChecked = false
             sheetBinding.btnSaveLine.isEnabled = false
             sheetBinding.tvPointsCount.text = "0 Points • 0.0 m"
-            sheetBinding.rvPoints.visibility = View.GONE
             sheetBinding.tvEmptyState.visibility = View.VISIBLE
 
             sheetBinding.btnCloseNewLine.setOnClickListener { hideNewLineBottomSheet() }
@@ -1001,6 +1001,9 @@ class MappingFragmentLogic(
 
             sheetBinding.rvPoints.layoutManager = LinearLayoutManager(fragment.requireContext())
             sheetBinding.rvPoints.adapter = adapter
+            // Keep dragged rows clipped within the list area so they do not appear under the Save button.
+            sheetBinding.rvPoints.clipToPadding = true
+            sheetBinding.rvPoints.clipChildren = true
 
             currentItemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
                 ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
@@ -1059,47 +1062,40 @@ class MappingFragmentLogic(
                     isCurrentlyActive: Boolean
                 ) {
                     super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+                }
 
-                    if (actionState == ItemTouchHelper.ACTION_STATE_DRAG && isCurrentlyActive) {
-                        val itemView = viewHolder.itemView
-                        val recyclerView = recyclerView
-                        val itemHeight = itemView.height
+                override fun interpolateOutOfBoundsScroll(
+                    recyclerView: RecyclerView,
+                    viewSize: Int,
+                    viewSizeOutOfBounds: Int,
+                    totalSize: Int,
+                    msSinceStartScroll: Long
+                ): Int {
+                    val direction = if (viewSizeOutOfBounds > 0) 1 else -1
+                    val absOutOfBounds = kotlin.math.abs(viewSizeOutOfBounds)
+                    val outOfBoundsRatio =
+                        (absOutOfBounds.toFloat() / viewSize.toFloat()).coerceIn(0f, 1f)
+                    val timeRatio = (msSinceStartScroll.toFloat() / 1000f).coerceIn(0f, 1f)
 
-                        val recyclerTop = recyclerView.top
-                        val recyclerBottom = recyclerView.bottom
-                        val itemTop = itemView.top + dY.toInt()
-                        val itemBottom = itemView.bottom + dY.toInt()
+                    // More aggressive response near/beyond edges so dragging downward scrolls promptly.
+                    val minScroll = 16
+                    val maxScroll = 110
+                    val speed =
+                        (minScroll + (maxScroll - minScroll) * (0.35f + 0.65f * outOfBoundsRatio) * (0.55f + 0.45f * timeRatio)).toInt()
 
-                        val scrollThreshold = itemHeight
-                        val maxScrollSpeed = 50
-
-                        when {
-                            itemTop <= recyclerTop + scrollThreshold -> {
-                                val distanceFromTop = (itemTop - recyclerTop).toFloat()
-                                val scrollSpeed = if (distanceFromTop > 0) {
-                                    (maxScrollSpeed * (1 - (distanceFromTop / scrollThreshold))).toInt()
-                                } else {
-                                    maxScrollSpeed
-                                }
-                                recyclerView.scrollBy(0, -scrollSpeed)
-                            }
-                            itemBottom >= recyclerBottom - scrollThreshold -> {
-                                val distanceFromBottom = (recyclerBottom - itemBottom).toFloat()
-                                val scrollSpeed = if (distanceFromBottom > 0) {
-                                    (maxScrollSpeed * (1 - (distanceFromBottom / scrollThreshold))).toInt()
-                                } else {
-                                    maxScrollSpeed
-                                }
-                                recyclerView.scrollBy(0, scrollSpeed)
-                            }
-                        }
-                    }
+                    return direction * speed.coerceAtMost(maxScroll)
                 }
 
                 override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
                 override fun isLongPressDragEnabled() = false
             })
             currentItemTouchHelper.attachToRecyclerView(sheetBinding.rvPoints)
+
+            // Match edit-line collapsed list height so swipe expansion/collapse behaves consistently.
+            val collapsedListHeight = (170 * fragment.resources.displayMetrics.density).toInt()
+            val rvParams = sheetBinding.rvPoints.layoutParams
+            rvParams.height = collapsedListHeight
+            sheetBinding.rvPoints.layoutParams = rvParams
 
             // Keyboard Handling: Keep bottom nav hidden while sheet is open
             sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
@@ -1117,6 +1113,7 @@ class MappingFragmentLogic(
             })
 
             setupSwipeToDismiss(sheetBinding.root) { hideNewLineBottomSheet() }
+            setupSwipeGestureForNewLine(sheetBinding.root, sheetBinding)
             }
         }
     }
@@ -2714,102 +2711,21 @@ class MappingFragmentLogic(
 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    val query = s?.toString()?.lowercase() ?: ""
-                    val filtered = items.filter {
-                        it.id.lowercase().contains(query) || it.codeId.lowercase().contains(query)
-                    }
-                    sheetBinding.rvObjectList.adapter =
-                        ObjectListAdapter(
-                            objects = filtered.toMutableList(),
-                            onItemClick = handleItemAction
-                        )
-                }
-            })
-
-            // Keyboard Handling: Keep bottom nav hidden while sheet is open
-            sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
-                ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    if (!sheetBinding.root.isAttachedToWindow) {
-                        sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                        return
-                    }
                     if (sheetBinding.root.visibility != View.VISIBLE) return
-
-                    // Ensure bottom nav stays hidden while sheet is visible
-                    hideBottomNavigation()
+                    val query = s?.toString()?.trim()?.lowercase() ?: ""
+                    val filtered = if (query.isEmpty()) {
+                        items
+                    } else {
+                        items.filter {
+                            it.id.lowercase().contains(query) ||
+                                it.codeId.lowercase().contains(query)
+                        }
+                    }
+                    adapter.updateItems(filtered)
                 }
             })
 
-            adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
-            // Don't enable swipe-to-dismiss for object list; only allow closing via close button
-            // to prevent accidental swipes to the right when users interact with the list
             }
-        }
-    }
-
-    private fun updateObjectListIfVisible() {
-        val sheetBinding = fragment.binding.bottomSheetObjectList
-        if (sheetBinding.root.visibility != View.VISIBLE) return
-
-        val allItems = processCollectedPointsForObjectList()
-        val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
-            allItems.filter { it.indicatorType == IndicatorType.POINT }
-        } else {
-            allItems
-        }
-
-        val handleItemAction = { item: ObjectListItem ->
-            if (fragment.isCreatingNewLine && item.indicatorType == IndicatorType.POINT) {
-                hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
-                val point = fragment.collectedLabeledPoints.find { it.id == item.id }
-                if (point != null) {
-                    addPointToNewLine(point)
-                }
-            } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
-                hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
-                val point = fragment.collectedLabeledPoints.find { it.id == item.id }
-                if (point != null && fragment.pendingEditLineSegment != null) {
-                    addExistingPointToLineSegment(point, fragment.pendingEditLineSegment!!)
-                    showEditLineBottomSheet(fragment.pendingEditLineSegment!!, transition = BottomSheetTransition.SLIDE_IN_LEFT, isRestoring = true)
-                }
-            } else {
-                hideObjectListBottomSheet(showNav = false) {
-                    if (item.indicatorType == IndicatorType.POINT) {
-                        fragment.collectedLabeledPoints.find { it.id == item.id }
-                            ?.let {
-                                animateToLocationWithZoom(
-                                    it.geoPoint,
-                                    fragment.binding.mapView.zoomLevelDouble.coerceAtLeast(18.0)
-                                )
-                                showPointDetailsBottomSheet(it)
-                            }
-                    } else {
-                        fragment.completedLineOverlays.find { (it as? ClickablePolylineOverlay)?.codeId == item.codeId }
-                            ?.let {
-                                val ls = it as ClickablePolylineOverlay
-                                zoomToLine(ls)
-                                handleLineSegmentClick(ls)
-                            }
-                    }
-                }
-            }
-            Unit
-        }
-
-        val query = sheetBinding.etSearchObject.text?.toString()?.lowercase() ?: ""
-        val filtered = if (query.isEmpty()) {
-            items
-        } else {
-            items.filter { it.id.lowercase().contains(query) || it.codeId.lowercase().contains(query) }
-        }
-        val adapter = sheetBinding.rvObjectList.adapter as? ObjectListAdapter
-        if (adapter != null) {
-            adapter.updateItems(filtered)
-        } else {
-            sheetBinding.rvObjectList.layoutManager = LinearLayoutManager(fragment.requireContext())
-            sheetBinding.rvObjectList.adapter =
-                ObjectListAdapter(objects = filtered.toMutableList(), onItemClick = handleItemAction)
         }
     }
 
@@ -5836,6 +5752,149 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         attachListenerRecursively(v)
     }
 
+    fun setupSwipeGestureForNewLine(v: View, sheetBinding: BottomSheetNewLineBinding) {
+        v.isClickable = true
+        var initialY = 0f
+        var initialX = 0f
+        var isDragging = false
+        var originalHeight = 0
+        var startHeight = 0
+        var lastEventTime = 0L
+
+        val gestureListener = View.OnTouchListener { view, event ->
+            if (view.canScrollVertically(-1) && !isDragging) return@OnTouchListener false
+
+            if (event.eventTime == lastEventTime) return@OnTouchListener isDragging
+            lastEventTime = event.eventTime
+
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialY = event.rawY
+                    initialX = event.rawX
+                    isDragging = false
+                    startHeight = sheetBinding.rvPoints.height
+
+                    val collapsedListHeight = (170 * fragment.resources.displayMetrics.density).toInt()
+                    originalHeight = collapsedListHeight
+                    false
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaY = initialY - event.rawY
+                    val deltaX = initialX - event.rawX
+
+                    val parentHeight =
+                        (sheetBinding.root.parent as? View)?.height
+                            ?: fragment.resources.displayMetrics.heightPixels
+
+                    val headerHeight = sheetBinding.rvPoints.top
+                    val footerHeight = sheetBinding.btnSaveLine.height
+                    val density = fragment.resources.displayMetrics.density
+                    val topGap = (25 * density).toInt()
+                    val bottomMargin = (40 * density).toInt()
+
+                    val rawFullHeight =
+                        parentHeight - (statusBarHeight + topGap + headerHeight + footerHeight + bottomMargin)
+                    val fullHeight = Math.max(originalHeight, rawFullHeight)
+
+                    if (!isDragging && Math.abs(deltaY) > 20f && Math.abs(deltaY) > Math.abs(deltaX)) {
+                        isDragging = true
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                        startHeight = sheetBinding.rvPoints.height
+                    }
+
+                    if (isDragging) {
+                        val newHeight = (startHeight + deltaY).toInt()
+                        val constrainedHeight = newHeight.coerceAtMost(fullHeight)
+                        val finalHeight = Math.max(originalHeight, constrainedHeight)
+
+                        val lp = sheetBinding.rvPoints.layoutParams
+                        lp.height = finalHeight
+                        sheetBinding.rvPoints.layoutParams = lp
+                        return@OnTouchListener true
+                    }
+                    false
+                }
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    if (isDragging) {
+                        val deltaY = initialY - event.rawY
+                        val currentHeight = sheetBinding.rvPoints.height
+                        val parentHeight =
+                            (sheetBinding.root.parent as? View)?.height
+                                ?: fragment.resources.displayMetrics.heightPixels
+
+                        val headerHeight = sheetBinding.rvPoints.top
+                        val footerHeight = sheetBinding.btnSaveLine.height
+                        val density = fragment.resources.displayMetrics.density
+                        val topGap = (25 * density).toInt()
+                        val bottomMargin = (40 * density).toInt()
+                        val rawFullHeight =
+                            parentHeight - (statusBarHeight + topGap + headerHeight + footerHeight + bottomMargin)
+                        val fullHeight = Math.max(originalHeight, rawFullHeight)
+
+                        val threshold = originalHeight + (fullHeight - originalHeight) * 0.15
+                        val isQuickExpand = startHeight < originalHeight + 50 && deltaY > 100
+                        val isQuickCollapse = startHeight > fullHeight - 50 && deltaY < -100
+
+                        if ((currentHeight < threshold && !isQuickExpand) || isQuickCollapse) {
+                            val anim = ValueAnimator.ofInt(currentHeight, originalHeight)
+                            anim.addUpdateListener { va ->
+                                val lp = sheetBinding.rvPoints.layoutParams
+                                lp.height = va.animatedValue as Int
+                                sheetBinding.rvPoints.layoutParams = lp
+                            }
+                            anim.duration = 150
+                            anim.interpolator = FastOutSlowInInterpolator()
+                            anim.start()
+
+                            fragment.binding.mapView.setMultiTouchControls(true)
+                            fragment.binding.mapView.setOnTouchListener(null)
+                            fragment.binding.llMapsButtons.visibility = View.VISIBLE
+                        } else {
+                            val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
+                            anim.addUpdateListener { va ->
+                                val lp = sheetBinding.rvPoints.layoutParams
+                                lp.height = va.animatedValue as Int
+                                sheetBinding.rvPoints.layoutParams = lp
+                            }
+                            anim.duration = 150
+                            anim.interpolator = FastOutSlowInInterpolator()
+                            anim.start()
+
+                            if (fullHeight > parentHeight * 0.5) {
+                                fragment.binding.mapView.setMultiTouchControls(false)
+                                fragment.binding.mapView.setOnTouchListener { _, _ -> true }
+                                fragment.binding.llMapsButtons.visibility = View.GONE
+                            }
+                        }
+                        isDragging = false
+                        return@OnTouchListener true
+                    }
+                    isDragging = false
+                    false
+                }
+
+                else -> false
+            }
+        }
+
+        fun attachListenerRecursively(view: View) {
+            if (view is RecyclerView || view is android.widget.ScrollView || view is androidx.core.widget.NestedScrollView) {
+                return
+            }
+            view.setOnTouchListener(gestureListener)
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    attachListenerRecursively(view.getChildAt(i))
+                }
+            }
+        }
+
+        attachListenerRecursively(v)
+    }
+
     private fun showPointLineSelection(b: BottomSheetLineSegmentBinding) {
         b.clLineMenu.animate().cancel()
         b.clLineMenu.visibility = View.VISIBLE
@@ -6649,6 +6708,30 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
     }
 
+    private fun updateObjectListIfVisible() {
+        val sheetBinding = fragment.binding.bottomSheetObjectList
+        if (sheetBinding.root.visibility != View.VISIBLE) return
+
+        val allItems = processCollectedPointsForObjectList()
+        val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
+            allItems.filter { it.indicatorType == IndicatorType.POINT }
+        } else {
+            allItems
+        }
+
+        val query = sheetBinding.etSearchObject.text?.toString()?.trim()?.lowercase() ?: ""
+        val filtered = if (query.isEmpty()) {
+            items
+        } else {
+            items.filter {
+                it.id.lowercase().contains(query) || it.codeId.lowercase().contains(query)
+            }
+        }
+
+        val adapter = sheetBinding.rvObjectList.adapter as? ObjectListAdapter
+        adapter?.updateItems(filtered)
+    }
+
     private fun addExistingPointToLineSegment(newPt: LabeledPoint, ls: ClickablePolylineOverlay) {
         fragment.isSelectingPointForEditLine = false
 
@@ -7275,4 +7358,5 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
+
 }
