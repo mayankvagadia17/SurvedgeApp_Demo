@@ -1076,7 +1076,6 @@ class MappingFragmentLogic(
                     val outOfBoundsRatio =
                         (absOutOfBounds.toFloat() / viewSize.toFloat()).coerceIn(0f, 1f)
                     val timeRatio = (msSinceStartScroll.toFloat() / 1000f).coerceIn(0f, 1f)
-
                     // More aggressive response near/beyond edges so dragging downward scrolls promptly.
                     val minScroll = 16
                     val maxScroll = 110
@@ -5739,10 +5738,10 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
 
         fun attachListenerRecursively(view: View) {
-            // Don't attach gesture listener to RecyclerView - let it handle its own scrolling
-            if (view !is RecyclerView && view !is android.widget.ScrollView && view !is androidx.core.widget.NestedScrollView) {
-                view.setOnTouchListener(gestureListener)
+            if (view is RecyclerView || view is android.widget.ScrollView || view is androidx.core.widget.NestedScrollView) {
+                return
             }
+            view.setOnTouchListener(gestureListener)
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) {
                     attachListenerRecursively(view.getChildAt(i))
@@ -6052,6 +6051,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             "${points.size} ${if (points.size == 1) "Point" else "Points"}"
 
         sheetBinding.rvPoints.layoutManager = LinearLayoutManager(fragment.requireContext())
+        sheetBinding.rvPoints.clipToPadding = true
+        sheetBinding.rvPoints.clipChildren = true
         val itemTouchHelper = ItemTouchHelper(object :
             ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
 
@@ -6104,41 +6105,27 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 isCurrentlyActive: Boolean
             ) {
                 super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+            }
 
-                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG && isCurrentlyActive) {
-                    val itemView = viewHolder.itemView
-                    val recyclerView = recyclerView
-                    val itemHeight = itemView.height
+            override fun interpolateOutOfBoundsScroll(
+                recyclerView: RecyclerView,
+                viewSize: Int,
+                viewSizeOutOfBounds: Int,
+                totalSize: Int,
+                msSinceStartScroll: Long
+            ): Int {
+                val direction = if (viewSizeOutOfBounds > 0) 1 else -1
+                val absOutOfBounds = kotlin.math.abs(viewSizeOutOfBounds)
+                val outOfBoundsRatio =
+                    (absOutOfBounds.toFloat() / viewSize.toFloat()).coerceIn(0f, 1f)
+                val timeRatio = (msSinceStartScroll.toFloat() / 1000f).coerceIn(0f, 1f)
 
-                    val recyclerTop = recyclerView.top
-                    val recyclerBottom = recyclerView.bottom
-                    val itemTop = itemView.top + dY.toInt()
-                    val itemBottom = itemView.bottom + dY.toInt()
+                val minScroll = 16
+                val maxScroll = 110
+                val speed =
+                    (minScroll + (maxScroll - minScroll) * (0.35f + 0.65f * outOfBoundsRatio) * (0.55f + 0.45f * timeRatio)).toInt()
 
-                    val scrollThreshold = itemHeight
-                    val maxScrollSpeed = 50
-
-                    when {
-                        itemTop <= recyclerTop + scrollThreshold -> {
-                            val distanceFromTop = (itemTop - recyclerTop).toFloat()
-                            val scrollSpeed = if (distanceFromTop > 0) {
-                                (maxScrollSpeed * (1 - (distanceFromTop / scrollThreshold))).toInt()
-                            } else {
-                                maxScrollSpeed
-                            }
-                            recyclerView.scrollBy(0, -scrollSpeed)
-                        }
-                        itemBottom >= recyclerBottom - scrollThreshold -> {
-                            val distanceFromBottom = (recyclerBottom - itemBottom).toFloat()
-                            val scrollSpeed = if (distanceFromBottom > 0) {
-                                (maxScrollSpeed * (1 - (distanceFromBottom / scrollThreshold))).toInt()
-                            } else {
-                                maxScrollSpeed
-                            }
-                            recyclerView.scrollBy(0, scrollSpeed)
-                        }
-                    }
-                }
+                return direction * speed.coerceAtMost(maxScroll)
             }
 
             override fun onSwiped(vh: RecyclerView.ViewHolder, d: Int) {}
