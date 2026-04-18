@@ -146,13 +146,42 @@ class MappingFragmentLogic(
 
         // Manage bottom navigation based on sheet type
         if (incoming != null) {
-            // Hide navigation for most sheets, except LINE_SEGMENT (point/line details)
-            if (currentActiveSheet != SheetType.LINE_SEGMENT) {
-                (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
-                    animate().cancel()
-                    visibility = View.GONE
-                    alpha = 1f
-                    translationY = 0f
+            // Check if this is an input sheet that should hide nav
+            when (incoming) {
+                fragment.binding.bottomSheetEditPoint.root,
+                fragment.binding.bottomSheetCollectPoint.root,
+                fragment.binding.bottomSheetNewLine.root,
+                fragment.binding.bottomSheetNewPoint.root,
+                fragment.binding.bottomSheetEditLine.root,
+                fragment.binding.bottomSheetSelectCode.root,
+                fragment.binding.bottomSheetObjectList.root -> {
+                    // Hide nav for input sheets
+                    (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                        animate().cancel()
+                        visibility = View.GONE
+                        alpha = 1f
+                        translationY = 0f
+                    }
+                }
+                fragment.binding.bottomSheetLineSegment.root -> {
+                    // Show nav for LINE_SEGMENT (info-only sheet)
+                    isNavHidden = false
+                    (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                        animate().cancel()
+                        visibility = View.VISIBLE
+                        alpha = 1f
+                        translationY = 0f
+                    }
+                }
+                else -> {
+                    // Keep nav visible by default
+                    isNavHidden = false
+                    (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
+                        animate().cancel()
+                        visibility = View.VISIBLE
+                        alpha = 1f
+                        translationY = 0f
+                    }
                 }
             }
         } else if (outgoing != null) {
@@ -301,10 +330,9 @@ class MappingFragmentLogic(
         SheetType.SELECT_CODE -> fragment.binding.bottomSheetSelectCode.root
         SheetType.OBJECT_LIST -> fragment.binding.bottomSheetObjectList.root
         SheetType.STAKEOUT -> fragment.binding.stakeoutBottomSheet.root
-        // Need to check if confirm dialog is in the layout - it was imported but might be a separate dialog
-        // For now, let's stick to these embedded ones.
         else -> null
     }
+
     private fun updateLineGeometry(ls: ClickablePolylineOverlay, points: List<LabeledPoint>) {
         ls.pointCount = points.size
         val gps = points.map { it.geoPoint }
@@ -2508,7 +2536,9 @@ class MappingFragmentLogic(
                 }
                 sheetBinding.btnMenu.setOnClickListener {
                     if (!isLine) {
-                        hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
+                        pushBackStack(SheetType.LINE_SEGMENT) {
+                            currentActiveSheet = SheetType.LINE_SEGMENT
+                        }
                         showEditPointBottomSheet(point)
                     } else {
                         if (sheetBinding.clLineMenu.visibility == View.VISIBLE) {
@@ -2525,7 +2555,9 @@ class MappingFragmentLogic(
                 sheetBinding.llEdit.setOnClickListener {
                     sheetBinding.clLineMenu.visibility = View.GONE
                     if (!isLine) {
-                        hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
+                        pushBackStack(SheetType.LINE_SEGMENT) {
+                            currentActiveSheet = SheetType.LINE_SEGMENT
+                        }
                         showEditPointBottomSheet(point)
                     }
                 }
@@ -7244,9 +7276,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 hideEditPointBottomSheet()
             }
 
-        sheetBinding.root.visibility = View.VISIBLE
-        animateSheetTransition(null, sheetBinding.root, transition)
-        adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
+            sheetBinding.root.visibility = View.VISIBLE
+            animateSheetTransition(null, sheetBinding.root, transition)
+            adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
 
             // Keyboard Handling: Expand to full screen when keyboard shows (same as collect point)
             sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
@@ -7302,8 +7334,6 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             // Show map buttons when keyboard is closed
                             fragment.binding.llMapsButtons.visibility = View.VISIBLE
                         }
-                        // Ensure bottom nav stays hidden while sheet is visible (keyboard closed)
-                        hideBottomNavigation()
                     }
                 }
             })
@@ -7317,14 +7347,6 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
     ) {
         val root = fragment.binding.bottomSheetEditPoint.root
         hideKeyboard(root)
-
-        // Show bottom navigation immediately (no animation) before sliding down
-        (fragment.activity as? MainActivity)?.binding?.bottomNavigationView?.apply {
-            animate().cancel()
-            visibility = View.VISIBLE
-            alpha = 1f
-            translationY = 0f
-        }
 
         animateSheetTransition(root, null, transition) {
             onHidden?.invoke()
