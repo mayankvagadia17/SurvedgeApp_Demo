@@ -983,6 +983,7 @@ class MappingFragmentLogic(
                         return@showSelectCodeBottomSheet
                     }
                     fragment.newLineCodeId = codeId
+                    updatePointIdFromSelectedCode(codeId)
                     sheetBinding.tvCodeId.text = fragment.newLineCodeId
                     updateNewLineUI()
                 }
@@ -2995,6 +2996,8 @@ class MappingFragmentLogic(
                 }
             }
 
+            sheetBinding.tvPointIdLabel.visibility = View.VISIBLE
+            sheetBinding.llPointIdContainer.visibility = View.VISIBLE
             sheetBinding.etPointId.setText(if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString())
             sheetBinding.etPointId.setHint(if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString())
             updatePointTypeIndicator(sheetBinding.viewTypeDot, fragment.selectedPointIndicatorType)
@@ -3071,6 +3074,7 @@ class MappingFragmentLogic(
                         sheetBinding.tvPointType.text = codeId
                         if (type == IndicatorType.LINE) trackLineCodeUsage(codeId)
                         updateCloseShape()
+                        updatePointIdFromSelectedCode(codeId)
                     }
                 }
 
@@ -6236,6 +6240,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 val oldCodeId = ls.codeId
                 ls.codeId = codeId
                 ls.featureCode = codeId.filter { it.isLetter() }.ifEmpty { "L" }
+                updatePointIdFromSelectedCode(codeId)
 
                 // Update all associated points in local list
                 fragment.collectedLabeledPoints.forEachIndexed { index, point ->
@@ -6853,6 +6858,35 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         return next
     }
 
+    private fun updatePointIdFromSelectedCode(codeId: String) {
+        val regex = Regex("^([a-zA-Z][a-zA-Z ]*)(\\d+)$")
+        val numRegex = Regex("^\\d+$")
+        val alphaOnlyRegex = Regex("^[a-zA-Z][a-zA-Z ]*$")
+
+        when {
+            regex.matches(codeId) -> {
+                val m = regex.find(codeId)
+                val prefix = m?.groupValues?.get(1) ?: ""
+                val number = m?.groupValues?.get(2)?.toIntOrNull() ?: 1
+                fragment.pointIdPrefix = prefix
+                fragment.pointIdNumericCounter = number
+            }
+            alphaOnlyRegex.matches(codeId) -> {
+                fragment.pointIdPrefix = codeId
+                fragment.pointIdNumericCounter = 1
+            }
+            numRegex.matches(codeId) -> {
+                fragment.pointIdPrefix = null
+                fragment.pointCounter = codeId.toIntOrNull() ?: 1
+            }
+            else -> {
+                fragment.pointIdPrefix = null
+                fragment.pointCounter = 1
+            }
+        }
+        updateCollectSheetPointId()
+    }
+
     private fun refreshNextPointIdForCollectSheet() {
         if (fragment.pointIdPrefix != null) {
             fragment.pointIdNumericCounter = computeNextPrefixNum(fragment.pointIdPrefix!!)
@@ -6865,6 +6899,15 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString()
             sheet.etPointId.setText(nextId)
             sheet.etPointId.setHint(nextId)
+        }
+    }
+
+    private fun updateCollectSheetPointId() {
+        val sheet = fragment.binding.bottomSheetCollectPoint
+        if (sheet.root.visibility == View.VISIBLE) {
+            val pointId = if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString()
+            sheet.etPointId.setText(pointId)
+            sheet.etPointId.setHint(pointId)
         }
     }
 
