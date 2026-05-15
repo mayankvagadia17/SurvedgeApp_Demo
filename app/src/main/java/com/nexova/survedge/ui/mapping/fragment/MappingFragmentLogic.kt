@@ -439,8 +439,8 @@ class MappingFragmentLogic(
                     com.nexova.survedge.ui.mapping.maplibre.LineData(
                         id = codeId,
                         points = orderedPoints.map { it.latLng },
-                        color = ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-                        width = 6f,
+                        color = Color.parseColor("#717680"),
+                        width = 2f,
                         isClosed = lineWithPoints.line.isClosed
                     )
                 )
@@ -449,6 +449,10 @@ class MappingFragmentLogic(
         
         // 2. MapLibre bulk update
         MapLibrePolylineHelper.updatePolylines(map, linesToRender)
+        
+        // 3. Ensure Z-order: Polylines < Points/Labels < User Location
+        bringLabelsToTop()
+        bringLocationMarkerToTop()
     }
 
     // ---------------------------------------------------------------------
@@ -1303,7 +1307,7 @@ class MappingFragmentLogic(
                 layerId,
                 latLngs,
                 mainColor,
-                6f,
+                2f,
                 isClosed = false
             )
             fragment.newLineOverlay = layerId
@@ -1316,7 +1320,7 @@ class MappingFragmentLogic(
                     closingLayerId,
                     listOf(latLngs.last(), latLngs.first()),
                     mainColor,
-                    6f,
+                    2f,
                     isClosed = false,
                     isDashed = true
                 )
@@ -1461,7 +1465,7 @@ class MappingFragmentLogic(
                 layerId,
                 latLngs,
                 mainColor,
-                6f,
+                2f,
                 isClosed = false
             )
             fragment.highlightedLineOverlay = layerId
@@ -1474,7 +1478,7 @@ class MappingFragmentLogic(
                     closingLayerId,
                     listOf(latLngs.last(), latLngs.first()),
                     mainColor,
-                    6f,
+                    2f,
                     isClosed = false,
                     isDashed = true
                 )
@@ -1921,7 +1925,7 @@ class MappingFragmentLogic(
 
             val previousId = fragment.highlightedLineOverlay
             if (previousId != null) {
-                MapLibrePolylineHelper.unhighlightPolyline(map, previousId, ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light))
+                MapLibrePolylineHelper.unhighlightPolyline(map, previousId)
             }
 
             MapLibrePolylineHelper.highlightPolyline(map, layerId, ContextCompat.getColor(fragment.requireContext(), R.color.primary))
@@ -2136,7 +2140,7 @@ class MappingFragmentLogic(
             if (clearState) {
                 fragment.highlightedLineOverlay?.let { layerId ->
                     fragment.mapLibreMap?.let { map ->
-                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId, ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light))
+                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId)
                     }
                 }
                 val wasCollectingStr = fragment.wasCollectingBeforePointDetails
@@ -3367,10 +3371,7 @@ class MappingFragmentLogic(
             color = if (isSelected) ContextCompat.getColor(
                 fragment.requireContext(),
                 R.color.primary
-            ) else ContextCompat.getColor(
-                fragment.requireContext(),
-                R.color.stakeout_connection_line
-            ); style = Paint.Style.FILL
+            ) else Color.parseColor("#252B37"); style = Paint.Style.FILL
         }
         canv.drawCircle(s / 2f, s / 2f, r, p)
         if (isSelected) canv.drawCircle(
@@ -3433,10 +3434,7 @@ class MappingFragmentLogic(
                 pY,
                 r,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = if (isSelected) prim else ContextCompat.getColor(
-                        fragment.requireContext(),
-                        R.color.stakeout_connection_line
-                    )
+                    color = if (isSelected) prim else Color.parseColor("#252B37")
                 })
             if (isSelected) canv.drawCircle(
                 x,
@@ -3904,7 +3902,7 @@ class MappingFragmentLogic(
                     layerId,
                     listOf(referenceLatLng, currentLatLng),
                     primaryColor,
-                    6f,
+                    2f,
                     isClosed = false,
                     isDashed = true
                 )

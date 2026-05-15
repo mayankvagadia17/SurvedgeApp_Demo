@@ -382,7 +382,7 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
             "connection_line",
             listOf(start, end),
             ContextCompat.getColor(fragment.requireContext(), R.color.stakeout_connection_line),
-            6f,
+            1f,
             closed = false,
             dashed = true
         )

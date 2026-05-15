@@ -30,8 +30,8 @@ object MapLibrePolylineHelper {
         mapLibreMap: MapLibreMap,
         lineId: String,
         points: List<LatLng>,
-        color: Int = Color.BLACK,
-        width: Float = 6f,
+        color: Int = Color.parseColor("#717680"),
+        width: Float = 2f,
         closed: Boolean = false,
         dashed: Boolean = false
     ): String {
@@ -71,7 +71,12 @@ object MapLibrePolylineHelper {
                     setProperties(PropertyFactory.lineDasharray(arrayOf(2f, 2f)))
                 }
             }
-            style.addLayer(layer)
+            // Add polyline below the points layer to ensure markers and labels stay on top
+            if (style.getLayer("points_layer") != null) {
+                style.addLayerBelow(layer, "points_layer")
+            } else {
+                style.addLayer(layer)
+            }
         } else {
             layer.setProperties(
                 PropertyFactory.lineColor(color),
@@ -105,7 +110,7 @@ object MapLibrePolylineHelper {
         lineId: String,
         points: List<LatLng>,
         color: Int = Color.BLACK,
-        width: Float = 6f,
+        width: Float = 1f,
         isClosed: Boolean = false,
         isDashed: Boolean = false
     ): String = createPolyline(mapLibreMap, lineId, points, color, width, isClosed, isDashed)
@@ -134,16 +139,16 @@ object MapLibrePolylineHelper {
     fun highlightPolyline(mapLibreMap: MapLibreMap, layerId: String, color: Int) {
         val style = mapLibreMap.style ?: return
         val layer = style.getLayerAs<LineLayer>(layerId)
-        layer?.setProperties(PropertyFactory.lineColor(color), PropertyFactory.lineWidth(8f))
+        layer?.setProperties(PropertyFactory.lineColor(color), PropertyFactory.lineWidth(2f))
     }
 
     /**
      * Unhighlight a polyline by resetting its color.
      */
-    fun unhighlightPolyline(mapLibreMap: MapLibreMap, layerId: String, color: Int = Color.BLACK) {
+    fun unhighlightPolyline(mapLibreMap: MapLibreMap, layerId: String, color: Int = Color.parseColor("#717680")) {
         val style = mapLibreMap.style ?: return
         val layer = style.getLayerAs<LineLayer>(layerId)
-        layer?.setProperties(PropertyFactory.lineColor(color), PropertyFactory.lineWidth(6f))
+        layer?.setProperties(PropertyFactory.lineColor(color), PropertyFactory.lineWidth(2f))
     }
 
     /**
