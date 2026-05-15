@@ -12,7 +12,7 @@ constraintlayout = "2.2.1"
 sspAndroid = "1.1.1"
 sdpAndroid = "1.1.1"
 lifecycle = "2.8.0"
-osmdroid = "6.1.20"
+maplibre = "11.6.1"
 coroutines = "1.7.3"
 playServicesLocation = "21.3.0"
 room = "2.6.1"
@@ -34,7 +34,7 @@ sdp-android = { module = "com.intuit.sdp:sdp-android", version.ref = "sdpAndroid
 ssp-android = { module = "com.intuit.ssp:ssp-android", version.ref = "sspAndroid" }
 androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
-osmdroid-android = { module = "org.osmdroid:osmdroid-android", version.ref = "osmdroid" }
+maplibre-android = { group = "org.maplibre.gl", name = "android-sdk", version.ref = "maplibre" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }

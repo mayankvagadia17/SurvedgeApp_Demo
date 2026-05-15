@@ -9,7 +9,7 @@
     android:clipToPadding="false"
     tools:context=".ui.mapping.fragment.MappingFragment">
 
-    <org.osmdroid.views.MapView
+    <org.maplibre.android.maps.MapView
         android:id="@+id/map_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -19,6 +19,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.0" />
+
+    <com.nexova.survedge.ui.mapping.overlay.BullseyeView
+        android:id="@+id/bullseye_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 
     <ImageButton
         android:id="@+id/img_back"

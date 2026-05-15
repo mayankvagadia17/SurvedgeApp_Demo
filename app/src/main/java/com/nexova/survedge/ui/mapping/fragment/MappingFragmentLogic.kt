@@ -68,22 +68,14 @@ import com.nexova.survedge.ui.mapping.adapter.IndicatorType
 import com.nexova.survedge.ui.mapping.adapter.ObjectListAdapter
 import com.nexova.survedge.ui.mapping.adapter.ObjectListItem
 import com.nexova.survedge.ui.mapping.drawable.CustomLocationPinDrawable
-import com.nexova.survedge.ui.mapping.maplibre.OsmdroidMarkerHelper
-import com.nexova.survedge.ui.mapping.maplibre.OsmdroidPolylineHelper
-import com.nexova.survedge.ui.mapping.overlay.ClickablePolylineOverlay
-import com.nexova.survedge.ui.mapping.overlay.DoubleTapInterceptorOverlay
+import com.nexova.survedge.ui.mapping.maplibre.MapLibreMarkerHelper
+import com.nexova.survedge.ui.mapping.maplibre.MapLibrePolylineHelper
 import com.nexova.survedge.ui.mapping.overlay.LabeledPoint
-import com.nexova.survedge.ui.mapping.overlay.PointClickHandlerOverlay
-import com.nexova.survedge.ui.mapping.overlay.RotationGestureOverlay
 import org.json.JSONArray
 import org.json.JSONObject
-import org.osmdroid.events.MapListener
-import org.osmdroid.events.ScrollEvent
-import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.overlay.Marker
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.camera.CameraUpdateFactory
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -92,8 +84,10 @@ import com.nexova.survedge.ui.stakeout.model.*
 import com.nexova.survedge.ui.stakeout.util.*
 import com.nexova.survedge.ui.mapping.viewmodel.MappingViewModel
 import com.nexova.survedge.ui.mapping.mapper.toPointEntity
-import com.nexova.survedge.data.db.entity.LineEntity
 import com.nexova.survedge.data.db.entity.LineWithPoints
+import org.maplibre.android.geometry.LatLngBounds
+import com.nexova.survedge.data.db.entity.PointEntity
+import com.nexova.survedge.data.db.entity.LineEntity
 
 /**
  * This class contains the bulk of the UI-handling logic that used to live inside MappingFragment.
@@ -333,33 +327,9 @@ class MappingFragmentLogic(
         else -> null
     }
 
-    private fun updateLineGeometry(ls: ClickablePolylineOverlay, points: List<LabeledPoint>) {
-        ls.pointCount = points.size
-        val gps = points.map { it.geoPoint }
-        var dist = 0.0
-        for (i in 0 until gps.size - 1) dist += gps[i].distanceToAsDouble(gps[i + 1])
-        if (ls.isClosed) dist += gps.last().distanceToAsDouble(gps.first())
-        ls.length = dist
-        ls.setPoints(if (ls.isClosed && gps.isNotEmpty() && gps.first() != gps.last()) gps + gps.first() else gps)
-        ls.labeledPoints = points
-
-        // Ensure points on map are updated effectively
-        updateMarkersForZoom(forceRefresh = true)
-        fragment.binding.mapView.invalidate()
-    }
 
     private val PREFS_NAME = "survedge_prefs"
     private val KEY_CUSTOM_CODES = "custom_codes"
-
-    // Optimization: Cache for markers to prevent expensive recreation
-    private data class PointMarkerCache(
-        val pointMarker: Marker,
-        var labelMarker: Marker? = null,
-        var lastIsSelected: Boolean? = null,
-        var lastCodeId: String? = null,
-        var isLabelShown: Boolean = false
-    )
-    private val pointMarkersCache = mutableMapOf<String, PointMarkerCache>()
 
     // Local storage of line entities to check for closure status
     private var collectedLines = listOf<LineWithPoints>()
@@ -447,23 +417,17 @@ class MappingFragmentLogic(
     }
 
     fun reconstructPolylines() {
-        // Clear existing completed line overlays from the map
-        fragment.completedLineOverlays.forEach {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-        }
-        fragment.completedLineOverlays.clear()
-
+        val map = fragment.mapLibreMap ?: return
+        
         // Build a lookup map from point ID to LabeledPoint for quick resolution
         val pointLookup = fragment.collectedLabeledPoints.associateBy { it.id }
 
-        // Track which line codes we've already handled from DB
-        val handledCodes = mutableSetOf<String>()
+        val linesToRender = mutableListOf<com.nexova.survedge.ui.mapping.maplibre.LineData>()
 
-        // 1. Recreate polylines from database lines (preserves user-arranged order via orderIndex)
+        // 1. Recreate polylines from database lines
         collectedLines.forEach { lineWithPoints ->
             val codeId = lineWithPoints.line.id
-            if (codeId.isBlank()) return@forEach
-            handledCodes.add(codeId)
+            if (codeId.isBlank() || codeId == fragment.pendingEditLineSegment) return@forEach
 
             // Resolve PointEntity -> LabeledPoint using the lookup, preserving DB order
             val orderedPoints = lineWithPoints.points.mapNotNull { pointEntity ->
@@ -471,79 +435,20 @@ class MappingFragmentLogic(
             }
 
             if (orderedPoints.size >= 2) {
-                val geoPoints = orderedPoints.map { it.geoPoint }
-                val isClosed = lineWithPoints.line.isClosed
-
-                var length = 0.0
-                for (i in 0 until geoPoints.size - 1) {
-                    length += geoPoints[i].distanceToAsDouble(geoPoints[i + 1])
-                }
-                if (isClosed) {
-                    length += geoPoints.last().distanceToAsDouble(geoPoints.first())
-                }
-
-                val clickablePolyline = ClickablePolylineOverlay(
-                    geoPoints,
-                    ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-                    6f,
-                    closed = isClosed
-                ).apply {
-                    this.codeId = codeId
-                    this.featureCode = lineWithPoints.line.code.ifEmpty {
-                        codeId.filter { it.isLetter() }.ifEmpty { "L" }
-                    }
-                    this.pointCount = orderedPoints.size
-                    this.length = length
-                    this.labeledPoints = ArrayList(orderedPoints)
-                    this.isClosed = isClosed
-                    setOnClickListener { handleLineSegmentClick(this) }
-                }
-
-                addPolylineBelowMarkers(clickablePolyline)
-                fragment.completedLineOverlays.add(clickablePolyline)
+                linesToRender.add(
+                    com.nexova.survedge.ui.mapping.maplibre.LineData(
+                        id = codeId,
+                        points = orderedPoints.map { it.latLng },
+                        color = ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
+                        width = 6f,
+                        isClosed = lineWithPoints.line.isClosed
+                    )
+                )
             }
         }
-
-        // 2. Fallback: handle any line-coded points not yet in the database (e.g., live tracking)
-        val linesByCode = mutableMapOf<String, MutableList<LabeledPoint>>()
-        fragment.collectedLabeledPoints.forEach { point ->
-            if (isLineCodeFromCodeId(point.codeId) && point.codeId !in handledCodes) {
-                linesByCode.getOrPut(point.codeId) { mutableListOf() }.add(point)
-            }
-        }
-
-        linesByCode.forEach { (codeId, points) ->
-            if (points.size >= 2) {
-                val sortedPoints = points.sortedBy { it.ts }
-                val geoPoints = sortedPoints.map { it.geoPoint }
-
-                var length = 0.0
-                for (i in 0 until geoPoints.size - 1) {
-                    length += geoPoints[i].distanceToAsDouble(geoPoints[i + 1])
-                }
-
-                val clickablePolyline = ClickablePolylineOverlay(
-                    geoPoints,
-                    ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-                    6f,
-                    closed = false
-                ).apply {
-                    this.codeId = codeId
-                    this.featureCode = codeId.filter { it.isLetter() }.ifEmpty { "L" }
-                    this.pointCount = sortedPoints.size
-                    this.length = length
-                    this.labeledPoints = ArrayList(sortedPoints)
-                    this.isClosed = false
-                    setOnClickListener { handleLineSegmentClick(this) }
-                }
-
-                addPolylineBelowMarkers(clickablePolyline)
-                fragment.completedLineOverlays.add(clickablePolyline)
-            }
-        }
-
-        ensurePointClickHandlerAtEnd()
-        fragment.binding.mapView.invalidate()
+        
+        // 2. MapLibre bulk update
+        MapLibrePolylineHelper.updatePolylines(map, linesToRender)
     }
 
     // ---------------------------------------------------------------------
@@ -825,7 +730,7 @@ class MappingFragmentLogic(
 
     private fun isLineCodeUsed(codeId: String): Boolean {
         if (fragment.collectedLabeledPoints.any { it.codeId == codeId }) return true
-        if (fragment.completedLineOverlays.any { (it as? ClickablePolylineOverlay)?.codeId == codeId }) return true
+        if (collectedLines.any { it.line.id == codeId }) return true
         return false
     }
 
@@ -924,24 +829,13 @@ class MappingFragmentLogic(
             val temporary = fragment.highlightedLineOverlay
 
             if (temporary != null && temporary != original) {
-                // The highlighted overlay is a temporary edit visual (orange), remove it
-                if (fragment.binding.mapView.overlays.contains(temporary)) {
-                    fragment.binding.mapView.overlays.remove(temporary)
-                }
-            }
-
-            if (original != null) {
-                original.unhighlight() // Ensure it returns to normal color (slate gray)
-                if (!fragment.binding.mapView.overlays.contains(original)) {
-                    // Restore the original line to the map
-                    fragment.binding.mapView.overlays.add(original)
-                }
+                fragment.mapLibreMap?.let { m -> MapLibrePolylineHelper.removePolyline(m, temporary) }
             }
 
             fragment.pendingEditLineSegment = null
             fragment.isSelectingPointForEditLine = false
             fragment.highlightedLineOverlay = null
-            fragment.binding.mapView.invalidate()
+            reconstructPolylines()
         }
 
         if (!isRestoring) {
@@ -1021,8 +915,8 @@ class MappingFragmentLogic(
             }, onItemClick = { item ->
                 fragment.collectedLabeledPoints.find { it.id == item.id }?.let {
                     animateToLocationWithZoom(
-                        it.geoPoint,
-                        fragment.binding.mapView.zoomLevelDouble.coerceAtLeast(18.0)
+                        it.latLng,
+                        (fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0).coerceAtLeast(18.0)
                     )
                 }
                 Unit
@@ -1157,8 +1051,9 @@ class MappingFragmentLogic(
 
     fun showObjectListBottomSheetInternalForEditLine(transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP) {
         pushBackStack(SheetType.EDIT_LINE) {
-            val ls = fragment.pendingEditLineSegment ?: return@pushBackStack
-            showEditLineBottomSheet(ls, BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
+            val lineId = fragment.pendingEditLineSegment ?: return@pushBackStack
+            val lineWithPoints = viewModel.currentLines.value.find { it.line.id == lineId } ?: return@pushBackStack
+            showEditLineBottomSheet(lineWithPoints, BottomSheetTransition.SLIDE_DOWN, isRestoring = true)
         }
         showObjectListBottomSheet(transition = transition, showAddButton = false, showTitle = true, sheetTitle = "Select Point")
     }
@@ -1187,22 +1082,20 @@ class MappingFragmentLogic(
             // Reset the saved flag for next time
             fragment.isNewLineSaved = false
 
+            val map = fragment.mapLibreMap
             fragment.newLinePoints.clear()
-            fragment.newLineOverlay?.let {
-                OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
+            fragment.newLineOverlay?.let { layerId ->
+                map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
             }
             fragment.newLineOverlay = null
 
-            fragment.closingSegmentOverlay?.let {
-                if (fragment.binding.mapView.overlays.contains(it)) {
-                    fragment.binding.mapView.overlays.remove(it)
-                }
+            fragment.closingSegmentOverlay?.let { layerId ->
+                map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
             }
             fragment.closingSegmentOverlay = null
 
             // Force refresh markers to show reverted state
             updateMarkersForZoom(forceRefresh = true)
-            fragment.binding.mapView.invalidate()
 
             if (showNav) {
                 restoreStateAfterClosingInfoSheet()
@@ -1216,75 +1109,42 @@ class MappingFragmentLogic(
 
     fun transferPointToCurrentLine(point: LabeledPoint): String? {
         // Iterate through all completed lines to find if this point belongs to one
-        // We must avoid the currently edited line (fragment.pendingEditLineSegment) if relevant
-        val iterator = fragment.completedLineOverlays.iterator()
         var inheritedCodeId: String? = null
+        val projectId = viewModel.currentProjectId.value ?: return null
+        
+        // Find the line that contains this point
+        val oldLineWithPoints = collectedLines.find { line ->
+            line.line.id != fragment.pendingEditLineSegment && line.points.any { it.id == point.id }
+        }
 
-        while (iterator.hasNext()) {
-            val line = iterator.next()
-            if (line is ClickablePolylineOverlay) {
-                if (line == fragment.pendingEditLineSegment) continue // Skip the one we are editing
-
-                // Check if point is in this line
-                val index = line.labeledPoints.indexOfFirst { it.id == point.id }
-                if (index != -1) {
-                    // Found it. Remove it.
-                    // safely remove
-                    if (line.labeledPoints is MutableList) {
-                        (line.labeledPoints as MutableList).removeAt(index)
-                    } else {
-                        val mutable = line.labeledPoints.toMutableList()
-                        mutable.removeAt(index)
-                        line.labeledPoints = ArrayList(mutable)
+        if (oldLineWithPoints != null) {
+            val remainingPoints = oldLineWithPoints.points.filter { it.id != point.id }
+            
+            if (remainingPoints.size < 2) {
+                // Line dissolves
+                inheritedCodeId = oldLineWithPoints.line.id
+                
+                // Clear codes for remaining orphan points in DB
+                remainingPoints.forEach { orphanEntity ->
+                    val updatedEntity = orphanEntity.copy(code = "")
+                    viewModel.savePoint(updatedEntity)
+                    
+                    // Also update local cache
+                    val index = fragment.collectedLabeledPoints.indexOfFirst { it.id == orphanEntity.id }
+                    if (index >= 0) {
+                        fragment.collectedLabeledPoints[index] = fragment.collectedLabeledPoints[index].copy(codeId = "")
                     }
-
-                    // If line has < 2 points, delete it
-                    if (line.labeledPoints.size < 2) {
-                        inheritedCodeId = line.codeId // Capture code before deletion
-
-                        // Clean up any potential visual artifacts (ghost lines)
-                        if (fragment.highlightedLineOverlay == line) {
-                            fragment.highlightedLineOverlay = null
-                        }
-                        if (fragment.pendingEditLineSegment == line) {
-                            fragment.pendingEditLineSegment = null
-                        }
-
-                        // Convert remaining "orphan" points to No Code
-                        line.labeledPoints.forEach { orphan ->
-                            val mainIndex =
-                                fragment.collectedLabeledPoints.indexOfFirst { it.id == orphan.id }
-                            if (mainIndex != -1) {
-                                val updatedPoint =
-                                    fragment.collectedLabeledPoints[mainIndex].copy(codeId = "")
-                                fragment.collectedLabeledPoints[mainIndex] = updatedPoint
-
-                                // UPDATE DATABASE: Save the point with cleared code
-                                viewModel.currentProjectId.value?.let { projectId ->
-                                    val pointEntity = updatedPoint.toPointEntity(projectId)
-                                    viewModel.savePoint(pointEntity)
-                                }
-                            }
-                        }
-
-                        // UPDATE DATABASE: Delete the dissolved line
-                        val lineEntity = collectedLines.find { it.line.id == line.codeId }?.line
-                        if (lineEntity != null) {
-                            viewModel.deleteLine(lineEntity)
-                        }
-
-                        OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, line)
-                        iterator.remove()
-                        continue // Move to next line check
-                    } else {
-                        // Correctly update the line's visual points on the map
-                        updateLineGeometry(line, line.labeledPoints)
-                    }
-                    fragment.binding.mapView.invalidate()
-                    // Continue checking other lines in case of duplicates
                 }
+                
+                // Delete the dissolved line
+                viewModel.deleteLine(oldLineWithPoints.line)
+            } else {
+                // Line persists but point is removed from it
+                // Logic: Since points hold the code, removing point from line means clearing its code
+                // which is handled by the caller or in this function
             }
         }
+        
         return inheritedCodeId
     }
 
@@ -1298,24 +1158,14 @@ class MappingFragmentLogic(
         }
 
         // Prevent adding points that are already part of an existing line
-        // Check 1: Visual Overlays (Most accurate for current session state)
-        val isVisuallyConnected = fragment.completedLineOverlays.any { overlay ->
-            (overlay is ClickablePolylineOverlay) && overlay.labeledPoints.any { it.id == point.id }
-        }
+        val isPointInLine = collectedLines.any { line -> line.points.any { it.id == point.id } }
 
-        // Check 2: Database State (Backup)
-        val isDbConnected = collectedLines.any { line -> line.points.any { it.id == point.id } }
-
-        if (isVisuallyConnected || isDbConnected) {
+        if (isPointInLine) {
             Toast.makeText(
                 fragment.requireContext(),
                 "Point is already part of another line",
                 Toast.LENGTH_SHORT
             ).show()
-            android.util.Log.d(
-                "MappingLogic",
-                "Blocked adding point ${point.id} - VisuallyConnected: $isVisuallyConnected, DbConnected: $isDbConnected"
-            )
             return
         }
 
@@ -1351,6 +1201,7 @@ class MappingFragmentLogic(
         }
 
         // Force refresh markers to show "L1" (or whatever new code is)
+        // Force refresh markers to show "L1" (or whatever new code is)
         updateMarkersForZoom(forceRefresh = true)
 
         updateNewLineUI()
@@ -1377,14 +1228,14 @@ class MappingFragmentLogic(
         val count = fragment.newLinePoints.size
 
         var length = 0.0
-        val geoPoints = fragment.newLinePoints.map { it.geoPoint }
-        if (geoPoints.size >= 2) {
-            for (i in 0 until geoPoints.size - 1) {
-                length += (geoPoints[i] as GeoPoint).distanceToAsDouble(geoPoints[i + 1])
+        val latLngs = fragment.newLinePoints.map { it.latLng }
+        if (latLngs.size >= 2) {
+            for (i in 0 until latLngs.size - 1) {
+                length += latLngs[i].distanceTo(latLngs[i + 1])
             }
             if (fragment.isNewLineClosed) {
-                length += (geoPoints.last() as GeoPoint).distanceToAsDouble(
-                    geoPoints.first()
+                length += latLngs.last().distanceTo(
+                    latLngs.first()
                 )
             }
         }
@@ -1429,53 +1280,49 @@ class MappingFragmentLogic(
     }
 
     fun updateNewLineOverlay() {
-        fragment.newLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
+        val map = fragment.mapLibreMap ?: return
+        
+        fragment.newLineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.newLineOverlay = null
         
-        fragment.closingSegmentOverlay?.let {
-            if (fragment.binding.mapView.overlays.contains(it)) {
-                fragment.binding.mapView.overlays.remove(it)
-            }
+        fragment.closingSegmentOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.closingSegmentOverlay = null
 
         if (fragment.newLinePoints.size >= 2) {
-            val geoPoints = fragment.newLinePoints.map { it.geoPoint }
+            val latLngs = fragment.newLinePoints.map { it.latLng }
             val mainColor = ContextCompat.getColor(fragment.requireContext(), R.color.primary)
             
-            // 1. Regular Polyline (Solid)
-            val polyline = ClickablePolylineOverlay(
-                geoPoints,
+            // 1. Regular Polyline
+            val layerId = "layer_line_new_preview"
+            MapLibrePolylineHelper.addPolyline(
+                map,
+                layerId,
+                latLngs,
                 mainColor,
                 6f,
-                closed = false, 
-                dashed = false
-            ).apply {
-                this.codeId = fragment.newLineCodeId
-                this.labeledPoints = ArrayList(fragment.newLinePoints)
-            }
-            addPolylineBelowMarkers(polyline)
-            fragment.newLineOverlay = polyline
+                isClosed = false
+            )
+            fragment.newLineOverlay = layerId
 
             // 2. Closing Segment (Only if closed) - Dashed
-            if (fragment.isNewLineClosed && geoPoints.size >= 3) {
-                val closingPoints = listOf(geoPoints.last(), geoPoints.first())
-                val closingPolyline = ClickablePolylineOverlay(
-                    closingPoints,
+            if (fragment.isNewLineClosed && latLngs.size >= 3) {
+                val closingLayerId = "layer_line_new_closing"
+                MapLibrePolylineHelper.addPolyline(
+                    map,
+                    closingLayerId,
+                    listOf(latLngs.last(), latLngs.first()),
                     mainColor,
                     6f,
-                    closed = false,
-                    dashed = true
-                ).apply {
-                    this.codeId = fragment.newLineCodeId
-                }
-                addPolylineBelowMarkers(closingPolyline)
-                fragment.closingSegmentOverlay = closingPolyline
+                    isClosed = false,
+                    isDashed = true
+                )
+                fragment.closingSegmentOverlay = closingLayerId
             }
         }
-        fragment.binding.mapView.invalidate()
     }
 
     fun addPointToEditLine(point: LabeledPoint) {
@@ -1491,16 +1338,12 @@ class MappingFragmentLogic(
             if (currentPoints.any { it.id == point.id }) return
 
             // Prevent adding points that are already part of another line (consistent with Add Line)
-            val currentLine = fragment.pendingEditLineSegment
-            val isVisuallyConnected = fragment.completedLineOverlays.any { overlay ->
-                (overlay is ClickablePolylineOverlay) && overlay != currentLine && overlay.labeledPoints.any { it.id == point.id }
-            }
-            val currentCode = currentLine?.codeId ?: ""
-            val isDbConnected = collectedLines.any { line ->
-                line.line.id != currentCode && line.points.any { it.id == point.id }
+            val currentLineId = fragment.pendingEditLineSegment
+            val isPointInAnotherLine = collectedLines.any { line ->
+                line.line.id != currentLineId && line.points.any { it.id == point.id }
             }
 
-            if (isVisuallyConnected || isDbConnected) {
+            if (isPointInAnotherLine) {
                 Toast.makeText(
                     fragment.requireContext(),
                     "Point is already part of another line",
@@ -1526,7 +1369,7 @@ class MappingFragmentLogic(
                         getCodeDescription(inheritedCode)
 
                     // Update pending segment code so it saves correctly
-                    fragment.pendingEditLineSegment?.codeId = inheritedCode
+                    fragment.pendingEditLineSegment = inheritedCode
 
                     // Also update ALL points in the adapter to reflect new code
                     val updatedPoints = currentPoints.map { it.copy(codeId = inheritedCode) }
@@ -1590,77 +1433,55 @@ class MappingFragmentLogic(
     }
 
     fun updateEditLineOverlay() {
+        val map = fragment.mapLibreMap ?: return
         val adapter = fragment.currentEditLineAdapter ?: return
         val points = adapter.getPoints()
-        val geoPoints = points.map { it.geoPoint }
+        val latLngs = points.map { it.latLng }
         val isClosed = fragment.currentEditLineBinding?.cbClosedLine?.isChecked == true
-        val editingCodeId = fragment.pendingEditLineSegment?.codeId
-            ?: points.firstOrNull()?.codeId.orEmpty()
+        val editingLineId = fragment.pendingEditLineSegment ?: ""
 
-        // Cleanup existing overlays
-        fragment.highlightedLineOverlay?.let {
-            if (fragment.binding.mapView.overlays.contains(it)) {
-                fragment.binding.mapView.overlays.remove(it)
-            }
+        // Cleanup existing preview overlays
+        fragment.highlightedLineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
-        fragment.closingSegmentOverlay?.let {
-            if (fragment.binding.mapView.overlays.contains(it)) {
-                fragment.binding.mapView.overlays.remove(it)
-            }
-        }
-
-        if (editingCodeId.isNotEmpty()) {
-            val staleSameCodeOverlays =
-                fragment.binding.mapView.overlays.filterIsInstance<ClickablePolylineOverlay>()
-                    .filter {
-                        it.codeId == editingCodeId &&
-                                it !== fragment.highlightedLineOverlay &&
-                                it !== fragment.closingSegmentOverlay
-                    }
-                    .toList()
-            staleSameCodeOverlays.forEach { fragment.binding.mapView.overlays.remove(it) }
+        fragment.highlightedLineOverlay = null
+        
+        fragment.closingSegmentOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.closingSegmentOverlay = null
 
-        if (geoPoints.size >= 2) {
-            // 1. Main Segment
-            // Always Solid + Primary Color (per user request)
-            // The closing segment will be Dashed + Primary Color
+        if (latLngs.size >= 2) {
             val mainColor = ContextCompat.getColor(fragment.requireContext(), R.color.primary)
-
-            val mainPolyline = ClickablePolylineOverlay(
-                geoPoints,
+            
+            // 1. Main Segment (Solid)
+            val layerId = "layer_line_edit_preview"
+            MapLibrePolylineHelper.addPolyline(
+                map,
+                layerId,
+                latLngs,
                 mainColor,
                 6f,
-                closed = false, // We render the closing segment separately if closed
-                dashed = false  // User wants main segment solid
-            ).apply {
-                this.codeId = fragment.pendingEditLineSegment?.codeId
-                    ?: (if (points.isNotEmpty()) points[0].codeId else "")
-                this.featureCode = fragment.pendingEditLineSegment?.featureCode
-                    ?: (this.codeId.filter { it.isLetter() }.ifEmpty { "L" })
-                this.labeledPoints = ArrayList(points)
-            }
-            addPolylineBelowMarkers(mainPolyline)
-            fragment.highlightedLineOverlay = mainPolyline
+                isClosed = false
+            )
+            fragment.highlightedLineOverlay = layerId
 
-            // 2. Closing Segment (Only if closed)
-            // Dashed + Primary Color
-            if (isClosed) {
-                val closingPoints = listOf(geoPoints.last(), geoPoints.first())
-                val closingPolyline = ClickablePolylineOverlay(
-                    closingPoints,
-                    ContextCompat.getColor(fragment.requireContext(), R.color.primary),
+            // 2. Closing Segment (Dashed)
+            if (isClosed && latLngs.size >= 3) {
+                val closingLayerId = "layer_line_edit_closing"
+                MapLibrePolylineHelper.addPolyline(
+                    map,
+                    closingLayerId,
+                    listOf(latLngs.last(), latLngs.first()),
+                    mainColor,
                     6f,
-                    closed = false,
-                    dashed = true
+                    isClosed = false,
+                    isDashed = true
                 )
-                addPolylineBelowMarkers(closingPolyline)
-                fragment.closingSegmentOverlay = closingPolyline
+                fragment.closingSegmentOverlay = closingLayerId
             }
         }
-        fragment.binding.mapView.invalidate()
-        updateMarkersForZoom(forceRefresh = true) // Sync markers with the new overlay points
+        updateMarkersForZoom(forceRefresh = true)
     }
 
     fun saveNewLine() {
@@ -1669,77 +1490,63 @@ class MappingFragmentLogic(
         // Update points to have the new Line Code
         val newCode = fragment.newLineCodeId
         val updatedLinePoints = ArrayList<LabeledPoint>()
+        val projectId = viewModel.currentProjectId.value ?: 1L
 
         fragment.newLinePoints.forEach { point ->
             val index = fragment.collectedLabeledPoints.indexOfFirst { it.id == point.id }
             if (index != -1) {
                 val oldPoint = fragment.collectedLabeledPoints[index]
-                // Only update if it doesn't already have a valid code?
-                // User request implies forcing it to behave like line point.
                 val newPoint = oldPoint.copy(codeId = newCode)
                 fragment.collectedLabeledPoints[index] = newPoint
                 updatedLinePoints.add(newPoint)
             } else {
-                // Should not happen for existing points, but if so keep as is
                 updatedLinePoints.add(point)
             }
         }
 
-        val geoPoints = updatedLinePoints.map { it.geoPoint }
-        var length = 0.0
-        for (i in 0 until geoPoints.size - 1) length += geoPoints[i].distanceToAsDouble(geoPoints[i + 1])
-        if (fragment.isNewLineClosed) length += geoPoints.last()
-            .distanceToAsDouble(geoPoints.first())
-
-        val clickablePolyline = ClickablePolylineOverlay(
-            geoPoints,
-            ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-            6f,
-            closed = fragment.isNewLineClosed
-        ).apply {
-            this.codeId = fragment.newLineCodeId
-            this.featureCode = fragment.newLineCodeId.filter { it.isLetter() }
-                .let { if (it.isEmpty()) "L" else it }
-            this.pointCount = updatedLinePoints.size
-            this.length = length
-            this.labeledPoints = updatedLinePoints
-            this.isClosed = fragment.isNewLineClosed
-            setOnClickListener { handleLineSegmentClick(this) }
-        }
-
-        addPolylineBelowMarkers(clickablePolyline)
-        fragment.completedLineOverlays.add(clickablePolyline)
-        ensurePointClickHandlerAtEnd()
-
         // Save to Database
         val lineEntity = LineEntity(
             id = fragment.newLineCodeId,
-            projectId = viewModel.currentProjectId.value ?: 0, // Fallback, should be set
-            code = fragment.newLineCodeId.filter { it.isLetter() }, // "L", "BLDG" etc
-            isClosed = fragment.isNewLineClosed
+            projectId = projectId,
+            code = fragment.newLineCodeId.filter { it.isLetter() }.ifEmpty { "L" },
+            isClosed = fragment.isNewLineClosed,
+            length = 0.0 // Will be calculated by logic if needed, or by reconstruct if we store it
         )
-        val pointEntities =
-            updatedLinePoints.map { it.toPointEntity(viewModel.currentProjectId.value ?: 0) }
-        viewModel.saveLine(lineEntity, pointEntities)
+        // Recalculate length for DB if needed
+        val latLngs = updatedLinePoints.map { it.latLng }
+        var length = 0.0
+        for (i in 0 until latLngs.size - 1) length += latLngs[i].distanceTo(latLngs[i + 1])
+        if (fragment.isNewLineClosed && latLngs.size >= 3) length += latLngs.last().distanceTo(latLngs.first())
+        
+        val lineToSave = lineEntity.copy(length = length)
+        val pointEntities = updatedLinePoints.map { it.toPointEntity(projectId) }
+        viewModel.saveLine(lineToSave, pointEntities)
 
-        // Force refresh of labels to show new codes
-        updateMarkersForZoom()
-
-        // Reset tracking state to prevent live tracking line from connecting to these points
-        fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
-        fragment.liveTrackingLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
+        // Clear local preview overlays
+        val map = fragment.mapLibreMap
+        fragment.newLineOverlay?.let { overlayId -> 
+            map?.let { m -> MapLibrePolylineHelper.removePolyline(m, overlayId) } 
+        }
+        fragment.newLineOverlay = null
+        
+        fragment.closingSegmentOverlay?.let { overlayId -> 
+            map?.let { m -> MapLibrePolylineHelper.removePolyline(m, overlayId) } 
+        }
+        fragment.closingSegmentOverlay = null
+        
+        fragment.liveTrackingLineOverlay?.let { overlayId -> 
+            map?.let { m -> MapLibrePolylineHelper.removePolyline(m, overlayId) } 
         }
         fragment.liveTrackingLineOverlay = null
 
-        // Mark as saved to prevent hideNewLineBottomSheet from reverting codeIds
+        // Mark as saved
         fragment.isNewLineSaved = true
 
-        // Reset and hide
-        hideNewLineBottomSheet()
+        // Reset tracking state
+        fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
 
-        // Maybe select/highlight the new line?
-        // handleLineSegmentClick(clickablePolyline)
+        // Hide sheet
+        hideNewLineBottomSheet()
     }
 
     fun findViewAt(parent: View, x: Int, y: Int): View? {
@@ -1864,7 +1671,7 @@ class MappingFragmentLogic(
     // ---------------------------------------------------------------------
 
     fun addPointAtLocation(
-        location: GeoPoint,
+        location: LatLng,
         pointId: String,
         codeId: String,
         indicatorType: IndicatorType
@@ -1938,13 +1745,13 @@ class MappingFragmentLogic(
             fragment.hasStartedNewLine = false
         }
 
-        fragment.lastZoomLevel = fragment.binding.mapView.zoomLevelDouble
+        fragment.lastZoomLevel = fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0
         updateMarkersForZoom()
         return true
     }
 
 
-    fun showDeleteLineOptionsDialog(lineSegment: ClickablePolylineOverlay) {
+    fun showDeleteLineOptionsDialog(lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints) {
         val dialog = BottomSheetDialog(fragment.requireContext())
         dialog.setContentView(R.layout.bottom_sheet_delete_line_options)
 
@@ -1953,12 +1760,12 @@ class MappingFragmentLogic(
         val btnCancel = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_cancel)
 
         btnKeepPoints?.setOnClickListener {
-            deleteLineOnlyKeepPoints(lineSegment)
+            deleteLineOnlyKeepPoints(lineWithPoints)
             dialog.dismiss()
         }
 
         btnDeleteAll?.setOnClickListener {
-            deleteLineAndPoints(lineSegment)
+            deleteLineAndPoints(lineWithPoints)
             dialog.dismiss()
         }
 
@@ -1969,224 +1776,103 @@ class MappingFragmentLogic(
         dialog.show()
     }
 
-    fun deleteLineOnlyKeepPoints(lineSegment: ClickablePolylineOverlay) {
-        // 1. Get line details before removal
-        val pointsToConvert = lineSegment.labeledPoints.toList()
-        val lineCode = lineSegment.codeId
+    fun deleteLineOnlyKeepPoints(lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints) {
+        // 1. Remove line entity from DB
+        viewModel.deleteLine(lineWithPoints.line)
 
-        // 2. Remove from completedLineOverlays
-        fragment.completedLineOverlays.remove(lineSegment)
-
-        // 3. Remove line from map overlays
-        fragment.binding.mapView.overlays.remove(lineSegment)
-
-        // 4. Remove line entity from DB
-        val lineEntity = collectedLines.find { it.line.id == lineSegment.codeId }?.line
-        if (lineEntity != null) {
-            viewModel.deleteLine(lineEntity)
+        // 2. Convert line points to individual points (remove line code)
+        lineWithPoints.points.forEach { pointEntity ->
+            val updatedEntity = pointEntity.copy(code = "")
+            viewModel.savePoint(updatedEntity)
         }
 
-        // 5. Convert line points to individual points (remove line code)
-        pointsToConvert.forEach { labeledPoint ->
-            val pointEntity = collectedLines
-                .flatMap { it.points }
-                .find { it.id == labeledPoint.id }
-
-            if (pointEntity != null) {
-                val updatedEntity = pointEntity.copy(code = "")
-                viewModel.savePoint(updatedEntity)
-            }
-        }
-
-        // 6. Update local collectedLabeledPoints to remove line code from points
-        val pointIds = pointsToConvert.map { it.id }.toSet()
-        fragment.collectedLabeledPoints.forEach { point ->
+        // 3. Update local state
+        val lineCode = lineWithPoints.line.id
+        val pointIds = lineWithPoints.points.map { it.id }.toSet()
+        fragment.collectedLabeledPoints.forEachIndexed { index, point ->
             if (point.id in pointIds && point.codeId == lineCode) {
-                val index = fragment.collectedLabeledPoints.indexOf(point)
-                if (index >= 0) {
-                    fragment.collectedLabeledPoints[index] = point.copy(codeId = "")
-                }
+                fragment.collectedLabeledPoints[index] = point.copy(codeId = "")
             }
         }
 
-        // 7. Update UI
-        if (fragment.highlightedLineOverlay == lineSegment) {
+        // 4. Clear highlighting if needed
+        val layerId = "layer_line_${lineWithPoints.line.id}"
+        if (fragment.highlightedLineOverlay == layerId) {
             fragment.highlightedLineOverlay = null
         }
-        fragment.selectedPoint = null
-        updateMarkersForZoom()
-        fragment.binding.mapView.invalidate()
+        
+        // UI removal and marker updates are handled by observers
         hideLineSegmentDetailsBottomSheet()
-        refreshNextPointIdForCollectSheet()
-
-        // 8. Refresh object list if visible
-        val sheetBinding = fragment.binding.bottomSheetObjectList
-        if (sheetBinding.root.visibility == View.VISIBLE) {
-            val allItems = processCollectedPointsForObjectList()
-            val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
-                allItems.filter { it.indicatorType == IndicatorType.POINT }
-            } else {
-                allItems
-            }
-            (sheetBinding.rvObjectList.adapter as? ObjectListAdapter)?.updateItems(items.toMutableList())
-        }
-
         Toast.makeText(fragment.requireContext(), "Line deleted (Points kept)", Toast.LENGTH_SHORT).show()
     }
 
-    fun deleteLineAndPoints(lineSegment: ClickablePolylineOverlay) {
-        // 1. Remove from completedLineOverlays
-        fragment.completedLineOverlays.remove(lineSegment)
+    fun deleteLineAndPoints(lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints) {
+        // 1. Remove line entity from DB
+        viewModel.deleteLine(lineWithPoints.line)
 
-        // 2. Remove line from map
-        OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, lineSegment)
-
-        // 3. Remove line entity from DB
-        val lineEntity = collectedLines.find { it.line.id == lineSegment.codeId }?.line
-        if (lineEntity != null) {
-            viewModel.deleteLine(lineEntity)
+        // 2. Remove points associated with this line via ViewModel
+        lineWithPoints.points.forEach { pointEntity ->
+            viewModel.deletePointById(pointEntity.id)
         }
 
-        // 4. Remove points associated with this line via ViewModel
-        val pointIdsToRemove = lineSegment.labeledPoints.map { it.id }.toSet()
-        pointIdsToRemove.forEach { id ->
-            viewModel.deletePointById(id)
-        }
-        // Local list update handled by Flow
-
-        // Remove markers
-        val markersToRemove =
-            fragment.markerToPointMap.entries.filter { it.value.id in pointIdsToRemove }
-        markersToRemove.forEach { (marker, _) ->
-            fragment.binding.mapView.overlays.remove(marker)
-            fragment.collectedPointMarkers.remove(marker)
-            fragment.markerToPointMap.remove(marker)
-        }
-
-        // 5. Update UI
-        if (fragment.highlightedLineOverlay == lineSegment) {
+        // 3. Clear state
+        val layerId = "layer_line_${lineWithPoints.line.id}"
+        if (fragment.highlightedLineOverlay == layerId) {
             fragment.highlightedLineOverlay = null
         }
         fragment.selectedPoint = null
-        updateMarkersForZoom()
-        fragment.binding.mapView.invalidate()
+        
+        // UI removal is handled by reconstructPolylines and updateMarkers (triggered by DB changes)
         hideLineSegmentDetailsBottomSheet()
-        refreshNextPointIdForCollectSheet()
-
-        // 6. Refresh object list if visible
-        val sheetBinding = fragment.binding.bottomSheetObjectList
-        if (sheetBinding.root.visibility == View.VISIBLE) {
-            val allItems = processCollectedPointsForObjectList()
-            val items = if (fragment.isSelectingPointForEditLine || fragment.isCreatingNewLine) {
-                allItems.filter { it.indicatorType == IndicatorType.POINT }
-            } else {
-                allItems
-            }
-            (sheetBinding.rvObjectList.adapter as? ObjectListAdapter)?.updateItems(items.toMutableList())
-        }
-
         Toast.makeText(fragment.requireContext(), "Line and points deleted", Toast.LENGTH_SHORT).show()
     }
 
-    fun deleteLineSegment(lineSegment: ClickablePolylineOverlay) {
-        deleteLineAndPoints(lineSegment)
+    fun deleteLineSegment(lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints) {
+        deleteLineAndPoints(lineWithPoints)
     }
 
     fun deletePoint(point: LabeledPoint) {
-        // 1. Remove from DB using ID to ensure the correct pk is found and deleted
+        // 1. Remove from DB using ID. Local list and map updates are handled by the database observer.
         viewModel.deletePointById(point.id)
-        // Local list update handled by Flow
 
-
-        // 2. Remove markers - MATCH ALL MARKERS for this point (Point + Label)
-        val markersToRemove = fragment.markerToPointMap.entries.filter { it.value.id == point.id }
-        markersToRemove.forEach { (marker, _) ->
-            fragment.binding.mapView.overlays.remove(marker)
-            fragment.collectedPointMarkers.remove(marker)
-            fragment.markerToPointMap.remove(marker)
-        }
-
-        // 3. Check and update lines
-        val linesToRemove = mutableListOf<Any>()
-        for (overlay in fragment.completedLineOverlays) {
-            if (overlay is ClickablePolylineOverlay) {
-                if (overlay.labeledPoints.any { it.id == point.id }) {
-                    val newPoints = overlay.labeledPoints.toMutableList()
-                    newPoints.removeIf { it.id == point.id }
-
-                    if (newPoints.size < 2) {
-                        linesToRemove.add(overlay)
-                    } else {
-                        overlay.labeledPoints = newPoints
-                        overlay.setPoints(newPoints.map { it.geoPoint })
-                        overlay.pointCount = newPoints.size
-
-                        // Recalculate length
-                        var length = 0.0
-                        for (i in 0 until newPoints.size - 1) {
-                            length += newPoints[i].geoPoint.distanceToAsDouble(newPoints[i + 1].geoPoint)
-                        }
-                        if (overlay.isClosed && newPoints.size > 2) {
-                            length += newPoints.last().geoPoint.distanceToAsDouble(newPoints.first().geoPoint)
-                        }
-                        overlay.length = length
-                    }
-                }
-            }
-        }
-
-        linesToRemove.forEach {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it as org.osmdroid.views.overlay.Polyline
-            )
-            fragment.completedLineOverlays.remove(it)
-        }
-
-        // 4. Update UI
+        // 2. Clear selected point if it was the one deleted
         if (fragment.selectedPoint?.id == point.id) {
             fragment.selectedPoint = null
         }
-        updateMarkersForZoom()
-        fragment.binding.mapView.invalidate()
+
         hideLineSegmentDetailsBottomSheet()
         refreshNextPointIdForCollectSheet()
         Toast.makeText(fragment.requireContext(), "Point deleted", Toast.LENGTH_SHORT).show()
     }
 
+
     fun finalizeCurrentLineSegment(closeFlag: Boolean = fragment.isShapeClosed) {
         val lineCodePoints =
             if (fragment.currentLineCodeId != null) getAllPointsInCurrentLineSegment() else getConsecutiveLineCodePoints()
 
-        fragment.polylineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
+        val map = fragment.mapLibreMap
+        fragment.polylineOverlay?.let { layerId ->
+            map?.let { MapLibrePolylineHelper.removePolyline(it, layerId) }
         }
         fragment.polylineOverlay = null
-        fragment.liveTrackingLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
+        fragment.liveTrackingLineOverlay?.let { layerId ->
+            map?.let { MapLibrePolylineHelper.removePolyline(it, layerId) }
         }
         fragment.liveTrackingLineOverlay = null
 
         if (lineCodePoints.size >= 2) {
-            val geoPoints = lineCodePoints.map { it.geoPoint }
+            val geoPoints = lineCodePoints.map { it.latLng }
             var length = 0.0
-            for (i in 0 until geoPoints.size - 1) length += geoPoints[i].distanceToAsDouble(
-                geoPoints[i + 1]
-            )
-            if (closeFlag) length += geoPoints.last().distanceToAsDouble(geoPoints.first())
+            for (i in 0 until geoPoints.size - 1) {
+                length += geoPoints[i].distanceTo(geoPoints[i + 1])
+            }
+            if (closeFlag) {
+                length += geoPoints.last().distanceTo(geoPoints.first())
+            }
 
             val codeId = lineCodePoints.firstOrNull()?.codeId ?: ""
-
-            // Persist Line State (Closure & Length)
             val projectId = viewModel.currentProjectId.value ?: 1L
             val existingLine = collectedLines.find { it.line.id == codeId }?.line
-            // Extract feature code (e.g. "L" from "L1") if creating new
             val featureCode = codeId.filter { it.isLetter() }
 
             val lineEntity = existingLine?.copy(
@@ -2201,44 +1887,21 @@ class MappingFragmentLogic(
             )
             val pointEntities = lineCodePoints.map { it.toPointEntity(projectId) }
             viewModel.saveLine(lineEntity, pointEntities)
-
-            fragment.completedLineOverlays.filter { it is ClickablePolylineOverlay && it.codeId == codeId }
-                .forEach {
-                    OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-                    fragment.completedLineOverlays.remove(it)
-                }
-
-            val clickablePolyline = ClickablePolylineOverlay(
-                geoPoints,
-                ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-                6f,
-                closed = closeFlag
-            ).apply {
-                this.codeId = codeId
-                this.featureCode = featureCode.ifEmpty { "L" }
-                this.pointCount = lineCodePoints.size
-                this.length = length
-                this.labeledPoints = lineCodePoints
-                this.isClosed = closeFlag
-                setOnClickListener { handleLineSegmentClick(this) }
-            }
-
-            addPolylineBelowMarkers(clickablePolyline)
-            fragment.completedLineOverlays.add(clickablePolyline)
-            ensurePointClickHandlerAtEnd()
-            updateMarkersForZoom()
-            bringLocationMarkerToTop()
+            
+            // Note: UI update is handled by the database observer triggering reconstructPolylines
         }
+
+        fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
 
         fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
         fragment.isShapeClosed = false
         fragment.addFromBeginning = false
         fragment.currentLineCodeId = null
         fragment.hasStartedNewLine = true
-        fragment.binding.mapView.invalidate()
+        updateMarkersForZoom()
     }
 
-    fun handleLineSegmentClick(clickedPolyline: ClickablePolylineOverlay) {
+    fun handleLineSegmentClick(layerId: String) {
         // Block all map interactions when Select Code, Collect Point, or New Line sheets are open
         if (fragment.binding.bottomSheetSelectCode.root.visibility == View.VISIBLE ||
             fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE ||
@@ -2246,41 +1909,41 @@ class MappingFragmentLogic(
             return
         }
 
+        val map = fragment.mapLibreMap ?: return
+        val lineId = layerId.replace("layer_line_", "")
+        val lineWithPoints = collectedLines.find { it.line.id == lineId } ?: return
+
         hideLineSegmentMenuThen {
             // Hide stakeout bottom sheet if it's currently visible (prevents overlap)
             if (fragment.currentStakeoutMode != StakeoutMode.NONE) {
                 fragment.helper.hideStakeoutUI(showNav = false)
             }
 
-            val previousHighlightedLine = fragment.highlightedLineOverlay
-            fragment.highlightedLineOverlay?.unhighlight()
-            if (previousHighlightedLine != null && previousHighlightedLine != clickedPolyline) updateMarkersForZoom(
-                forceRefresh = true
-            )
+            val previousId = fragment.highlightedLineOverlay
+            if (previousId != null) {
+                MapLibrePolylineHelper.unhighlightPolyline(map, previousId, ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light))
+            }
 
-            // Always highlight and show the bottom sheet (don't deselect on second click, like points)
-            clickedPolyline.highlight(
-                ContextCompat.getColor(
-                    fragment.requireContext(),
-                    R.color.primary
-                )
-            )
-            fragment.highlightedLineOverlay = clickedPolyline
-            showLineSegmentDetailsBottomSheet(clickedPolyline)
-            updateMarkersForZoom(forceRefresh = true)
-            fragment.binding.mapView.invalidate()
+            MapLibrePolylineHelper.highlightPolyline(map, layerId, ContextCompat.getColor(fragment.requireContext(), R.color.primary))
+            fragment.highlightedLineOverlay = layerId
+            showLineSegmentDetailsBottomSheet(lineWithPoints)
+            updateMarkersForZoom()
         }
     }
 
     fun showLineSegmentDetailsBottomSheet(
-        lineSegment: ClickablePolylineOverlay,
+        lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         showNav: Boolean = true
     ) = hideMenu {
         showSheet(SheetType.LINE_SEGMENT, transition) {
             fragment.selectedPoint = null
-            lineSegment.highlight(ContextCompat.getColor(fragment.requireContext(), R.color.primary))
-            fragment.highlightedLineOverlay = lineSegment
+            
+            val layerId = "layer_line_${lineWithPoints.line.id}"
+            fragment.mapLibreMap?.let {
+                MapLibrePolylineHelper.highlightPolyline(it, layerId, ContextCompat.getColor(fragment.requireContext(), R.color.primary))
+            }
+            fragment.highlightedLineOverlay = layerId
             updateMarkersForZoom()
 
             // Ensure accurate offset is applied
@@ -2294,24 +1957,29 @@ class MappingFragmentLogic(
 
             sheetBinding.root.elevation = 24f * fragment.resources.displayMetrics.density
             sheetBinding.root.translationZ = 24f * fragment.resources.displayMetrics.density
-            sheetBinding.tvCodeId.text = lineSegment.codeId.ifEmpty { "No code" }
+            sheetBinding.tvCodeId.text = lineWithPoints.line.id.ifEmpty { "No code" }
             sheetBinding.llCodeIdContainer.visibility = View.VISIBLE
             sheetBinding.viewTypeDot.visibility = View.GONE
             sheetBinding.txtPointId.visibility = View.GONE
+            
+            val pointCount = lineWithPoints.points.size
+            val length = lineWithPoints.line.length
+            
             sheetBinding.tvSegmentInfo.text =
-                "${lineSegment.pointCount} Points | ${String.format("%.1f M", lineSegment.length)}"
-            sheetBinding.txtPointInfo.text = "${lineSegment.pointCount}"
-            sheetBinding.txtDistanceInfo.text = String.format("%.1f M", lineSegment.length)
-            sheetBinding.txtSlopeDistanceInfo.text = String.format("%.1f M", lineSegment.length)
+                "$pointCount Points | ${String.format("%.1f M", length)}"
+            sheetBinding.txtPointInfo.text = "$pointCount"
+            sheetBinding.txtDistanceInfo.text = String.format("%.1f M", length)
+            sheetBinding.txtSlopeDistanceInfo.text = String.format("%.1f M", length)
 
             sheetBinding.llContinueCollect.setOnClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
-                lineSegment.labeledPoints.lastOrNull() ?: return@setOnClickListener
-                fragment.selectedPointCodeId = lineSegment.codeId
+                val lastPoint = lineWithPoints.points.lastOrNull() ?: return@setOnClickListener
+                fragment.selectedPointCodeId = lineWithPoints.line.id
                 fragment.selectedPointIndicatorType = IndicatorType.LINE
-                fragment.currentLineCodeId = lineSegment.codeId
+                fragment.currentLineCodeId = lineWithPoints.line.id
+                // Find index of first point with this code in the overall collected list
                 fragment.lineSegmentStartIndex =
-                    fragment.collectedLabeledPoints.indexOfFirst { it.codeId == lineSegment.codeId }
+                    fragment.collectedLabeledPoints.indexOfFirst { it.codeId == lineWithPoints.line.id }
                         .coerceAtLeast(0)
                 fragment.wasCollectingBeforePointDetails = true
                 fragment.isShapeClosed = false
@@ -2334,11 +2002,11 @@ class MappingFragmentLogic(
                     showPointLineSelection(sheetBinding)
                 }
                 sheetBinding.llContinueCollect.visibility =
-                    if (lineSegment.isClosed) View.GONE else View.VISIBLE
+                    if (lineWithPoints.line.isClosed) View.GONE else View.VISIBLE
             }
 
             sheetBinding.llContinueCollect.visibility =
-                if (lineSegment.isClosed) View.GONE else View.VISIBLE
+                if (lineWithPoints.line.isClosed) View.GONE else View.VISIBLE
             
             // ENSURE Edit button and Menu button are visible and active for Lines
             sheetBinding.llEdit.visibility = View.VISIBLE
@@ -2380,17 +2048,15 @@ class MappingFragmentLogic(
 
             sheetBinding.llEdit.setOnClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
-                // Push current sheet so EditLine's Close goes back here.
-                // pushBackStack { showLineSegmentDetailsBottomSheet(lineSegment, BottomSheetTransition.SLIDE_IN_LEFT) ; Unit }
                 hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
-                showEditLineBottomSheet(lineSegment)
+                showEditLineBottomSheet(lineWithPoints)
             }
 
             // Populate Points List
-            val items = lineSegment.labeledPoints.map { point ->
+            val items = lineWithPoints.points.map { point ->
                 ObjectListItem(
                     id = point.id,
-                    codeId = point.codeId,
+                    codeId = point.code,
                     dateTime = point.ts,
                     indicatorType = IndicatorType.POINT
                 )
@@ -2400,8 +2066,8 @@ class MappingFragmentLogic(
                 fragment.collectedLabeledPoints.find { it.id == item.id }
                     ?.let {
                         animateToLocationWithZoom(
-                            it.geoPoint,
-                            fragment.binding.mapView.zoomLevelDouble.coerceAtLeast(18.0)
+                            it.latLng,
+                            fragment.mapLibreMap?.cameraPosition?.zoom?.coerceAtLeast(18.0) ?: 18.0
                         )
                         showPointDetailsBottomSheet(it)
                     }
@@ -2409,29 +2075,33 @@ class MappingFragmentLogic(
             })
 
             sheetBinding.llDeleteLineButton.setOnClickListener {
-                showDeleteLineOptionsDialog(lineSegment)
+                showDeleteLineOptionsDialog(lineWithPoints)
             }
 
             sheetBinding.btnStakeout.setSwipeSafeClickListener {
                 sheetBinding.clLineMenu.visibility = View.GONE
-                val points = lineSegment.labeledPoints.map {
+                val points = lineWithPoints.points.map {
                     StakeoutPoint(
                         id = it.id,
-                        name = it.codeId,
-                        latitude = it.geoPoint.latitude,
-                        longitude = it.geoPoint.longitude,
+                        name = it.code,
+                        latitude = it.latitude,
+                        longitude = it.longitude,
                         elevation = it.elevation,
-                        isLine = true // From lineSegment, so it's a line
+                        isLine = true
                     )
                 }
 
                 // Manually clear selection state without triggering bottom nav show
-                fragment.highlightedLineOverlay?.unhighlight()
+                fragment.mapLibreMap?.let { map ->
+                    fragment.highlightedLineOverlay?.let { layerId ->
+                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId as String)
+                    }
+                }
                 fragment.highlightedLineOverlay = null
                 fragment.selectedPoint = null
                 updateMarkersForZoom()
 
-                fragment.restoreLineSegmentAfterStakeout = lineSegment
+                fragment.restoreLineSegmentAfterStakeout = lineWithPoints.line.id
                 hideLineSegmentDetailsBottomSheet(clearState = false, showNav = false)
                 startStakeoutSession(points)
             }
@@ -2439,6 +2109,10 @@ class MappingFragmentLogic(
             sheetBinding.root.visibility = View.VISIBLE
             adjustMapsButtonsForBottomSheet(overrideHeight = sheetBinding.root.height)
         }
+    }
+
+    fun hidePointDetailsBottomSheet() {
+        hideLineSegmentDetailsBottomSheet()
     }
 
     fun hideLineSegmentDetailsBottomSheet(
@@ -2450,7 +2124,6 @@ class MappingFragmentLogic(
         val sheetBinding = fragment.binding.bottomSheetLineSegment
         adjustMapsButtonsForBottomSheet(closingView = sheetBinding.root)
         fragment.binding.root.setOnTouchListener(null)
-        fragment.binding.mapView.setOnTouchListener(null)
 
         val afterAnimation: () -> Unit = {
             onHidden?.invoke()
@@ -2458,18 +2131,19 @@ class MappingFragmentLogic(
             sheetBinding.llPointLineInfo.visibility = View.GONE
 
             // RESTORE map interaction and buttons when closed
-            fragment.binding.mapView.setMultiTouchControls(true)
-            fragment.binding.mapView.setOnTouchListener(null)
             fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
             if (clearState) {
-                fragment.highlightedLineOverlay?.unhighlight()
+                fragment.highlightedLineOverlay?.let { layerId ->
+                    fragment.mapLibreMap?.let { map ->
+                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId, ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light))
+                    }
+                }
                 val wasCollectingStr = fragment.wasCollectingBeforePointDetails
                 fragment.highlightedLineOverlay = null
                 fragment.wasCollectingBeforePointDetails = false
                 fragment.selectedPoint = null
-                updateMarkersForZoom(forceRefresh = true)
-                fragment.binding.mapView.invalidate()
+                updateMarkersForZoom()
                 if (wasCollectingStr && fragment.currentLineCodeId != null) showCollectPointBottomSheet() else if (showNav) restoreStateAfterClosingInfoSheet()
             } else if (showNav) {
                 restoreStateAfterClosingInfoSheet()
@@ -2498,7 +2172,11 @@ class MappingFragmentLogic(
             }
 
             showSheet(SheetType.LINE_SEGMENT, transition) {
-                fragment.highlightedLineOverlay?.unhighlight()
+                fragment.highlightedLineOverlay?.let { layerId ->
+                    fragment.mapLibreMap?.let { map ->
+                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId)
+                    }
+                }
                 fragment.highlightedLineOverlay = null
 
                 fragment.selectedPoint = point
@@ -2595,14 +2273,18 @@ class MappingFragmentLogic(
                     val sp = StakeoutPoint(
                         id = point.id,
                         name = point.codeId,
-                        latitude = point.geoPoint.latitude,
-                        longitude = point.geoPoint.longitude,
+                        latitude = point.latLng.latitude,
+                        longitude = point.latLng.longitude,
                         elevation = point.elevation,
                         isLine = isLineCodeFromCodeId(point.codeId)
                     )
 
                     // Manually clear selection state without triggering bottom nav show
-                    fragment.highlightedLineOverlay?.unhighlight()
+                    fragment.highlightedLineOverlay?.let { layerId ->
+                        fragment.mapLibreMap?.let { map ->
+                            MapLibrePolylineHelper.unhighlightPolyline(map, layerId)
+                        }
+                    }
                     fragment.highlightedLineOverlay = null
                     fragment.selectedPoint = null
                     updateMarkersForZoom()
@@ -2701,8 +2383,12 @@ class MappingFragmentLogic(
                 } else if (fragment.isSelectingPointForEditLine && item.indicatorType == IndicatorType.POINT) {
                     val point = fragment.collectedLabeledPoints.find { it.id == item.id }
                     if (point != null && fragment.pendingEditLineSegment != null) {
-                        hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
-                        addExistingPointToLineSegment(point, fragment.pendingEditLineSegment!!)
+                        val lineId = fragment.pendingEditLineSegment!!
+                        val lineWithPoints = viewModel.currentLines.value.find { it.line.id == lineId }
+                        if (lineWithPoints != null) {
+                            hideObjectListBottomSheet(showNav = false, transition = BottomSheetTransition.SLIDE_OUT_RIGHT)
+                            addExistingPointToLineSegment(point, lineWithPoints)
+                        }
                     }
                     fragment.isSelectingPointForEditLine = false
                 } else {
@@ -2713,17 +2399,19 @@ class MappingFragmentLogic(
                             fragment.collectedLabeledPoints.find { it.id == item.id }
                                 ?.let {
                                     animateToLocationWithZoom(
-                                        it.geoPoint,
-                                        fragment.binding.mapView.zoomLevelDouble.coerceAtLeast(18.0)
+                                        it.latLng,
+                                        (fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0).coerceAtLeast(18.0)
                                     )
                                     showPointDetailsBottomSheet(it)
                                 }
                         } else {
-                            fragment.completedLineOverlays.find { (it as? ClickablePolylineOverlay)?.codeId == item.codeId }
-                                ?.let {
-                                    val ls = it as ClickablePolylineOverlay
-                                    zoomToLine(ls)
-                                    handleLineSegmentClick(ls)
+                            fragment.completedLineOverlays.find { it == item.codeId }
+                                ?.let { lineId ->
+                                    val lineWithPoints = collectedLines.find { it.line.id == lineId }
+                                    lineWithPoints?.let { lp ->
+                                        zoomToLine(lp.points.map { LatLng(it.latitude, it.longitude) })
+                                        handleLineSegmentClick("layer_line_$lineId")
+                                    }
                                 }
                         }
                     }
@@ -2773,8 +2461,7 @@ class MappingFragmentLogic(
         onHidden: (() -> Unit)? = null
     ) {
         // Re-enable map touch and show map buttons
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.setOnTouchListener(null)
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
         // Hide keyboard when closing bottom sheet with search input
@@ -2798,7 +2485,7 @@ class MappingFragmentLogic(
                 if (ls != null && b != null && adapter != null) {
                     val currentPoints = adapter.getPoints()
                     // Keep pending line synced to current unsaved edit state while edit sheet is open.
-                    ls.labeledPoints = currentPoints.toList()
+                    // (Logic removed as ls is now an ID string, state is managed in the adapter)
 
                     val count = currentPoints.size
                     b.tvPointsCount.text = "${count} ${if (count == 1) "Point" else "Points"}"
@@ -2827,29 +2514,26 @@ class MappingFragmentLogic(
         val items = mutableListOf<ObjectListItem>()
         val processedLineCodes = mutableSetOf<String>()
 
-        // 1. Process points from collected list
+        // 1. Process all points, grouping by line code if they belong to a line
         fragment.collectedLabeledPoints.reversed().forEach { point ->
             if (isLineCodeFromCodeId(point.codeId)) {
                 if (!processedLineCodes.contains(point.codeId)) {
-                    val allLinePoints =
-                        fragment.collectedLabeledPoints.filter { it.codeId == point.codeId }
+                    val lineWithPoints = collectedLines.find { it.line.id == point.codeId }
+                    val allLinePoints = lineWithPoints?.points?.map { it.toLabeledPoint() } ?: fragment.collectedLabeledPoints.filter { it.codeId == point.codeId }
+                    
                     var dist = 0.0
-                    val gps = allLinePoints.map { it.geoPoint }
-                    if (gps.size >= 2) {
-                        for (i in 0 until gps.size - 1) dist += gps[i].distanceToAsDouble(gps[i + 1])
+                    if (allLinePoints.size >= 2) {
+                        for (i in 0 until allLinePoints.size - 1) {
+                            dist += allLinePoints[i].latLng.distanceTo(allLinePoints[i + 1].latLng)
+                        }
                     }
-                    val isClosed =
-                        fragment.completedLineOverlays.any { it is ClickablePolylineOverlay && it.codeId == point.codeId && it.isClosed }
-                    if (isClosed && gps.size >= 2) dist += gps.last()
-                        .distanceToAsDouble(gps.first())
+                    val isClosed = lineWithPoints?.line?.isClosed ?: false
+                    if (isClosed && allLinePoints.size >= 2) {
+                        dist += allLinePoints.last().latLng.distanceTo(allLinePoints.first().latLng)
+                    }
 
                     val nestedItems = allLinePoints.map { lp ->
-                        ObjectListItem(
-                            lp.id,
-                            lp.codeId,
-                            formatTimestamp(lp.ts),
-                            IndicatorType.POINT
-                        )
+                        ObjectListItem(lp.id, lp.codeId, formatTimestamp(lp.ts), IndicatorType.POINT)
                     }
                     items.add(
                         ObjectListItem(
@@ -2858,7 +2542,7 @@ class MappingFragmentLogic(
                             "${allLinePoints.size} Points | ${String.format("%.1f M", dist)}",
                             IndicatorType.LINE,
                             allLinePoints.size,
-                            dist,
+                            dist ?: 0.0,
                             nestedPoints = nestedItems
                         )
                     )
@@ -2866,39 +2550,32 @@ class MappingFragmentLogic(
                 }
             } else {
                 items.add(
-                    ObjectListItem(
-                        point.id,
-                        point.codeId,
-                        formatTimestamp(point.ts),
-                        IndicatorType.POINT
-                    )
+                    ObjectListItem(point.id, point.codeId, formatTimestamp(point.ts), IndicatorType.POINT)
                 )
             }
         }
 
-        // 2. Process manual lines from completedLineOverlays that weren't caught above
-        for (overlay in fragment.completedLineOverlays) {
-            if (overlay is ClickablePolylineOverlay && !processedLineCodes.contains(overlay.codeId)) {
-                val nestedItems = overlay.labeledPoints.map { lp ->
-                    ObjectListItem(
-                        lp.id,
-                        lp.codeId,
-                        formatTimestamp(lp.ts),
-                        IndicatorType.POINT
-                    )
+        // 2. Add any lines that don't have points in the current collected list (unlikely but safe)
+        collectedLines.forEach { lineWithPoints ->
+            if (!processedLineCodes.contains(lineWithPoints.line.id)) {
+                val allLinePoints = lineWithPoints.points.map { it.toLabeledPoint() }
+                if (allLinePoints.isEmpty()) return@forEach
+                
+                var dist = lineWithPoints.line.length ?: 0.0
+                val nestedItems = allLinePoints.map { lp ->
+                    ObjectListItem(lp.id, lp.codeId, formatTimestamp(lp.ts), IndicatorType.POINT)
                 }
                 items.add(
                     ObjectListItem(
-                        overlay.codeId ?: "Line",
-                        overlay.codeId ?: "Line",
-                        "${overlay.pointCount} Points | ${String.format("%.1f M", overlay.length)}",
+                        lineWithPoints.line.id,
+                        lineWithPoints.line.id,
+                        "${allLinePoints.size} Points | ${String.format("%.1f M", dist)}",
                         IndicatorType.LINE,
-                        overlay.pointCount,
-                        overlay.length,
+                        allLinePoints.size,
+                        dist,
                         nestedPoints = nestedItems
                     )
                 )
-                processedLineCodes.add(overlay.codeId ?: "")
             }
         }
 
@@ -2955,7 +2632,7 @@ class MappingFragmentLogic(
                     fragment.selectedPointCodeId
                 ) && fragment.currentLineCodeId == null
             ) {
-                if (fragment.completedLineOverlays.any { (it as? ClickablePolylineOverlay)?.codeId == fragment.selectedPointCodeId } ||
+                if (fragment.completedLineOverlays.any { it == fragment.selectedPointCodeId } ||
                     fragment.collectedLabeledPoints.any { it.codeId == fragment.selectedPointCodeId }) {
                     advanceLineCodeForNewSegment(sheetBinding)
                 }
@@ -3099,37 +2776,21 @@ class MappingFragmentLogic(
                                 viewModel.deletePointById(removedPoint.id)
                                 fragment.collectedLabeledPoints.removeAt(fragment.collectedLabeledPoints.size - 1)
 
-                                val markersToRemove =
-                                    fragment.markerToPointMap.entries.filter { (_, point) ->
-                                        point.codeId == fragment.currentLineCodeId
-                                    }
-                                markersToRemove.forEach { (marker, _) ->
-                                    fragment.binding.mapView.overlays.remove(marker)
-                                    fragment.markerToPointMap.remove(marker)
-                                    fragment.collectedPointMarkers.remove(marker)
-                                }
-
-                                fragment.polylineOverlay?.let {
-                                    OsmdroidPolylineHelper.removePolyline(
-                                        fragment.binding.mapView,
-                                        it
-                                    )
+                                val map = fragment.mapLibreMap
+                                fragment.polylineOverlay?.let { layerId ->
+                                    map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                                 }
                                 fragment.polylineOverlay = null
 
-                                fragment.liveTrackingLineOverlay?.let {
-                                    OsmdroidPolylineHelper.removePolyline(
-                                        fragment.binding.mapView,
-                                        it
-                                    )
+                                fragment.liveTrackingLineOverlay?.let { layerId ->
+                                    map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                                 }
                                 fragment.liveTrackingLineOverlay = null
                                 fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
                                 fragment.currentLineCodeId = null
 
                                 refreshNextPointIdForCollectSheet()
-                                updateMarkersForZoom()
-                                fragment.binding.mapView.invalidate()
+                                updateMarkersForZoom(forceRefresh = true)
                                 updateCloseShape()
                             }
                             openSelectCodeSheet()
@@ -3175,34 +2836,19 @@ class MappingFragmentLogic(
                                         viewModel.deletePointById(pt.id)
                                     }
                                     // fragment.collectedLabeledPoints.removeAt... handled by Flow
-                                    val markersToRemove =
-                                        fragment.markerToPointMap.entries.filter { (_, point) ->
-                                            point.codeId == fragment.currentLineCodeId
-                                        }
-                                    markersToRemove.forEach { (marker, _) ->
-                                        fragment.binding.mapView.overlays.remove(marker)
-                                        fragment.collectedPointMarkers.remove(marker)
-                                        fragment.markerToPointMap.remove(marker)
+                                    val map = fragment.mapLibreMap
+                                    fragment.polylineOverlay?.let { layerId ->
+                                        map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                                     }
-                                    fragment.polylineOverlay?.let {
-                                        OsmdroidPolylineHelper.removePolyline(
-                                            fragment.binding.mapView,
-                                            it
-                                        )
-                                        fragment.polylineOverlay = null
+                                    fragment.polylineOverlay = null
+                                    fragment.liveTrackingLineOverlay?.let { layerId ->
+                                        map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                                     }
-                                    fragment.liveTrackingLineOverlay?.let {
-                                        OsmdroidPolylineHelper.removePolyline(
-                                            fragment.binding.mapView,
-                                            it
-                                        )
-                                        fragment.liveTrackingLineOverlay = null
-                                    }
+                                    fragment.liveTrackingLineOverlay = null
                                     fragment.lineSegmentStartIndex =
                                         fragment.collectedLabeledPoints.size
                                     fragment.currentLineCodeId = null
-                                    updateMarkersForZoom()
-                                    fragment.binding.mapView.invalidate()
+                                    updateMarkersForZoom(forceRefresh = true)
                                 }
                                 finalizeCurrentLineSegment(closeFlag = fragment.isShapeClosed)
                                 fragment.isShapeClosed = false
@@ -3234,7 +2880,7 @@ class MappingFragmentLogic(
                 } else {
                     pid = sheetBinding.etPointId.text.toString()
                 }
-                val loc = fragment.currentLocation ?: fragment.locationMarker?.position
+                val loc = fragment.currentLocation
                 if (loc != null && pid.isNotEmpty()) {
                     val success = addPointAtLocation(
                         loc,
@@ -3297,35 +2943,20 @@ class MappingFragmentLogic(
                         val removedPoint = fragment.collectedLabeledPoints.last()
                         viewModel.deletePointById(removedPoint.id)
                         fragment.collectedLabeledPoints.removeAt(fragment.collectedLabeledPoints.size - 1)
-                        val markersToRemove =
-                            fragment.markerToPointMap.entries.filter { (_, point) ->
-                                point.codeId == fragment.currentLineCodeId
-                            }
-                        markersToRemove.forEach { (marker, _) ->
-                            fragment.binding.mapView.overlays.remove(marker)
-                            fragment.markerToPointMap.remove(marker)
-                            fragment.collectedPointMarkers.remove(marker)
-                        }
-                        fragment.polylineOverlay?.let {
-                            OsmdroidPolylineHelper.removePolyline(
-                                fragment.binding.mapView,
-                                it
-                            )
+                        val map = fragment.mapLibreMap
+                        fragment.polylineOverlay?.let { layerId ->
+                            map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                         }
                         fragment.polylineOverlay = null
-                        fragment.liveTrackingLineOverlay?.let {
-                            OsmdroidPolylineHelper.removePolyline(
-                                fragment.binding.mapView,
-                                it
-                            )
+                        fragment.liveTrackingLineOverlay?.let { layerId ->
+                            map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                         }
                         fragment.liveTrackingLineOverlay = null
                         fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
                         fragment.currentLineCodeId = null
 
                         refreshNextPointIdForCollectSheet()
-                        updateMarkersForZoom()
-                        fragment.binding.mapView.invalidate()
+                        updateMarkersForZoom(forceRefresh = true)
                     }
                     hideCollectPointBottomSheet(finalizeSegment = false, showNav = showNav)
                     onExit?.invoke()
@@ -3547,8 +3178,7 @@ class MappingFragmentLogic(
         previousSheet: SheetType? = null
     ) {
         // Re-enable map touch and show map buttons
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.setOnTouchListener(null)
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
         // Clear horizontal animations to avoid slide issues during hide
@@ -3594,33 +3224,30 @@ class MappingFragmentLogic(
 
 
     fun redrawPolyline() {
-        fragment.polylineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
+        val map = fragment.mapLibreMap ?: return
+        
+        fragment.polylineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.polylineOverlay = null
-        fragment.liveTrackingLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
+        fragment.liveTrackingLineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.liveTrackingLineOverlay = null
 
         val points = getConsecutiveLineCodePoints()
         if (points.size >= 2) {
-            fragment.polylineOverlay = OsmdroidPolylineHelper.createPolyline(
-                fragment.binding.mapView,
-                points.map { it.geoPoint },
+            val layerId = "layer_line_current"
+            MapLibrePolylineHelper.addPolyline(
+                map,
+                layerId,
+                points.map { it.latLng },
                 ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
                 6f,
-                closed = fragment.isShapeClosed,
-                dashed = false
+                isClosed = fragment.isShapeClosed
             )
+            fragment.polylineOverlay = layerId
         }
-        fragment.binding.mapView.invalidate()
     }
 
     fun redrawPolylineAsClosed() {
@@ -3629,280 +3256,57 @@ class MappingFragmentLogic(
     }
 
     fun clearCollectedPoints() {
-        fragment.collectedPointMarkers.forEach { fragment.binding.mapView.overlays.remove(it) }
-        fragment.collectedPointMarkers.clear()
-        fragment.markerToPointMap.clear()
+        val map = fragment.mapLibreMap ?: return
+        
+        // 1. Clear markers via helper
+        MapLibreMarkerHelper.clearMarkers(map)
+        // Legacy caches cleared
 
-        // Clear caches
-        pointMarkersCache.clear()
-
+        // 2. Clear logical points
         fragment.collectedLabeledPoints.clear()
-        fragment.polylineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
-        }; fragment.polylineOverlay = null
-        fragment.liveTrackingLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
-        }; fragment.liveTrackingLineOverlay = null
-        fragment.completedLineOverlays.forEach {
-            OsmdroidPolylineHelper.removePolyline(
-                fragment.binding.mapView,
-                it
-            )
+
+        // 3. Remove polylines
+        fragment.polylineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
-        fragment.completedLineOverlays.clear()
+        fragment.polylineOverlay = null
+        fragment.liveTrackingLineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
+        }
+        fragment.liveTrackingLineOverlay = null
+
+        // All permanent lines from DB will be cleared only if DB is cleared,
+        // but here we just want to clear the "Current session" overlays if any.
+        // If we want to clear ALL lines:
+        MapLibrePolylineHelper.clearPolylines(map)
+
         fragment.highlightedLineOverlay = null
         fragment.isShapeClosed = false
         fragment.lineSegmentStartIndex = 0
         fragment.currentLineCodeId = null
-        fragment.binding.mapView.invalidate()
+    }
+
+    fun refreshMapData() {
+        updateMarkersForZoom(forceRefresh = true)
+        reconstructPolylines()
     }
 
     fun updateMarkersForZoom(forceRefresh: Boolean = false) {
         if (fragment.isInBullseyeMode) return // Do not draw markers in Bullseye mode
-        // if (fragment.collectedLabeledPoints.isEmpty()) return // Handled by cleanup
-
-        // 1. Identify active points
-        val activePointIds = fragment.collectedLabeledPoints.map { it.id }.toSet()
-
-        // 2. Cleanup (Remove deleted points from cache and map)
-        val cacheIterator = pointMarkersCache.iterator()
-        while (cacheIterator.hasNext()) {
-            val entry = cacheIterator.next()
-            if (!activePointIds.contains(entry.key)) {
-                val cache = entry.value
-                // Remove Point Marker
-                while (fragment.binding.mapView.overlays.remove(cache.pointMarker)) { /* Remove all instances */
-                }
-                fragment.collectedPointMarkers.remove(cache.pointMarker)
-                fragment.markerToPointMap.remove(cache.pointMarker)
-
-                // Remove Label Marker
-                cache.labelMarker?.let {
-                    while (fragment.binding.mapView.overlays.remove(it)) { /* Remove all instances */
-                    }
-                    fragment.collectedPointMarkers.remove(it)
-                    fragment.markerToPointMap.remove(it)
-                }
-
-                cacheIterator.remove()
-            }
+        val map = fragment.mapLibreMap ?: return
+        
+        // Ensure all points have their icons added to the style
+        fragment.collectedLabeledPoints.forEach { point ->
+            val iconId = "icon_${point.id}"
+            val isSelected = point.id == fragment.selectedPoint?.id
+            val (bitmap, _) = createLabeledPointBitmap(point.id, point.codeId, isSelected)
+            MapLibreMarkerHelper.addOrUpdateIcon(map, iconId, bitmap)
         }
-
-        // 3. Calculate Visibility (Collision Detection)
-        val projection = fragment.binding.mapView.projection
-
-        // Pre-calculate selection states for performance and consistency
-        val selectedPointId = fragment.selectedPoint?.id
-        val selectedLinePointIds =
-            fragment.highlightedLineOverlay?.labeledPoints?.map { it.id }?.toSet() ?: emptySet()
-        val editLinePointIds =
-            fragment.currentEditLineAdapter?.getPoints()?.map { it.id }?.toSet() ?: emptySet()
-        val newLinePointIds = fragment.newLinePoints.map { it.id }.toSet()
-
-        // Calculate priority indices for collision detection
-        val priorityIndices = mutableSetOf<Int>()
-        fragment.collectedLabeledPoints.forEachIndexed { index, labeledPoint ->
-            val isCurrentLinePoint =
-                fragment.currentLineCodeId != null && labeledPoint.codeId == fragment.currentLineCodeId
-            val isSelected =
-                labeledPoint.id == selectedPointId ||
-                        selectedLinePointIds.contains(labeledPoint.id) ||
-                        editLinePointIds.contains(labeledPoint.id) ||
-                        newLinePointIds.contains(labeledPoint.id)
-            val isStakeoutTarget = fragment.currentStakeoutMode != StakeoutMode.NONE &&
-                    fragment.stakeoutSession?.targetPoints?.getOrNull(
-                        fragment.stakeoutSession?.currentIndex ?: 0
-                    )?.id == labeledPoint.id
-
-            if (isCurrentLinePoint || isSelected || isStakeoutTarget) {
-                priorityIndices.add(index)
-            }
-        }
-
-        // Note: For large datasets, this visibility calculation might still be a bottleneck on zoom
-        // but it is necessary for decluttering.
-        val visibleLabelIndices =
-            getVisibleLabelIndices(fragment.collectedLabeledPoints, projection, priorityIndices)
-
-        // 4. Update/Add Loop (Incremental)
-        fragment.collectedLabeledPoints.forEachIndexed { index, labeledPoint ->
-            val isSelected =
-                labeledPoint.id == selectedPointId ||
-                        selectedLinePointIds.contains(labeledPoint.id) ||
-                        editLinePointIds.contains(labeledPoint.id) ||
-                        newLinePointIds.contains(labeledPoint.id)
-            val showLabel = visibleLabelIndices.contains(index)
-
-            var cache = pointMarkersCache[labeledPoint.id]
-            val overlays = fragment.binding.mapView.overlays
-
-            if (cache == null) {
-                // Create New Point Marker
-                val bitmap = createPointOnlyBitmap(isSelected = isSelected)
-                val marker = OsmdroidMarkerHelper.createMarker(
-                    fragment.binding.mapView,
-                    bitmap,
-                    labeledPoint.geoPoint,
-                    0.5f,
-                    0.5f
-                )
-                setupMarkerClickListener(marker)
-
-                cache = PointMarkerCache(marker, null, isSelected, labeledPoint.codeId)
-                pointMarkersCache[labeledPoint.id] = cache
-
-                // Add to tracking lists
-                fragment.collectedPointMarkers.add(marker)
-                fragment.markerToPointMap[marker] = labeledPoint
-            } else {
-                // Reuse existing Point Marker
-                // Update properties if state changed
-                if (cache.lastIsSelected != isSelected || cache.lastCodeId != labeledPoint.codeId || forceRefresh) {
-                    val bitmap = createPointOnlyBitmap(isSelected = isSelected)
-                    cache.pointMarker.icon = BitmapDrawable(fragment.resources, bitmap)
-                }
-
-                // Ensure position is correct
-                if (cache.pointMarker.position.latitude != labeledPoint.geoPoint.latitude ||
-                    cache.pointMarker.position.longitude != labeledPoint.geoPoint.longitude
-                ) {
-                    cache.pointMarker.position = labeledPoint.geoPoint
-                }
-
-                if (!overlays.contains(cache.pointMarker)) {
-                    overlays.add(cache.pointMarker)
-                } else if (cache.lastIsSelected != isSelected || cache.lastCodeId != labeledPoint.codeId || forceRefresh) {
-                    // Force re-add to ensure redraw and correct z-order
-                    overlays.remove(cache.pointMarker)
-                    overlays.add(cache.pointMarker)
-                }
-
-                fragment.markerToPointMap[cache.pointMarker] = labeledPoint
-            }
-
-            // Handle Label Marker
-            if (showLabel) {
-                // REGENERATION CONDITIONS:
-                // 1. Label doesn't exist
-                // 2. Selection state changed
-                // 3. Code changed
-                // 4. Label was previously hidden (FORCE REFRESH)
-                val stateChanged =
-                    cache.lastIsSelected != isSelected || cache.lastCodeId != labeledPoint.codeId || forceRefresh
-
-                if (cache.labelMarker == null || stateChanged || !cache.isLabelShown) {
-                    // Create or Update Label Marker
-                    if (cache.labelMarker == null) {
-                        val (bitmap, anchorY) = createLabeledPointBitmap(
-                            labeledPoint.id,
-                            labeledPoint.codeId,
-                            isSelected = isSelected,
-                            drawPoint = false
-                        )
-                        val marker = OsmdroidMarkerHelper.createMarker(
-                            fragment.binding.mapView,
-                            bitmap,
-                            labeledPoint.geoPoint,
-                            0.5f,
-                            anchorY
-                        )
-                        setupMarkerClickListener(marker)
-                        cache.labelMarker = marker
-
-                        fragment.collectedPointMarkers.add(marker)
-                        fragment.markerToPointMap[marker] = labeledPoint
-                    } else {
-                        // Update existing label marker
-                        val (bitmap, anchorY) = createLabeledPointBitmap(
-                            labeledPoint.id,
-                            labeledPoint.codeId,
-                            isSelected = isSelected,
-                            drawPoint = false
-                        )
-                        cache.labelMarker!!.icon = BitmapDrawable(fragment.resources, bitmap)
-                        cache.labelMarker!!.setAnchor(0.5f, anchorY)
-                    }
-                }
-
-                // Ensure visibility / Position
-                val labelM = cache.labelMarker!!
-                if (labelM.position.latitude != labeledPoint.geoPoint.latitude ||
-                    labelM.position.longitude != labeledPoint.geoPoint.longitude
-                ) {
-                    labelM.position = labeledPoint.geoPoint
-                }
-
-                if (!overlays.contains(labelM)) {
-                    overlays.add(labelM)
-                } else if (stateChanged) {
-                    // Force re-add to bring to front of its layer and ensure redraw
-                    overlays.remove(labelM)
-                    overlays.add(labelM)
-                }
-                fragment.markerToPointMap[labelM] = labeledPoint
-
-                // Update cache state for label if it was shown/processed
-                cache.isLabelShown = true
-            } else {
-                // Hide Label Logic
-                cache.labelMarker?.let {
-                    while (overlays.remove(it)) { /* Remove all instances */
-                    }
-
-                    // Failsafe: If it was orange, make it black so it's not a glaring orange ghost
-                    if (cache.lastIsSelected == true || forceRefresh) {
-                        val (bitmap, anchorY) = createLabeledPointBitmap(
-                            labeledPoint.id,
-                            labeledPoint.codeId,
-                            isSelected = false,
-                            drawPoint = false
-                        )
-                        it.icon = BitmapDrawable(fragment.resources, bitmap)
-                        it.setAnchor(0.5f, anchorY)
-                    }
-                }
-                cache.isLabelShown = false
-            }
-
-            // Sync final state back to cache
-            cache.lastIsSelected = isSelected
-            cache.lastCodeId = labeledPoint.codeId
-        }
-
-        fragment.binding.mapView.invalidate()
-
-        // Bring selected point to top
-        fragment.selectedPoint?.let { point ->
-            pointMarkersCache[point.id]?.let { cache ->
-                // Move Point Marker to end
-                if (fragment.binding.mapView.overlays.contains(cache.pointMarker)) {
-                    while (fragment.binding.mapView.overlays.remove(cache.pointMarker)) { /* Remove all */
-                    }
-                    fragment.binding.mapView.overlays.add(cache.pointMarker)
-                }
-                // Move Label Marker to end
-                cache.labelMarker?.let { label ->
-                    if (fragment.binding.mapView.overlays.contains(label)) {
-                        while (fragment.binding.mapView.overlays.remove(label)) { /* Remove all */
-                        }
-                        fragment.binding.mapView.overlays.add(label)
-                    }
-                }
-            }
-        }
-
-        bringLocationMarkerToTop()
-        ensurePointClickHandlerAtEnd()
-        fragment.binding.mapView.invalidate()
+        
+        MapLibreMarkerHelper.updateMarkers(map, fragment.collectedLabeledPoints, fragment.selectedPoint?.id)
     }
 
-    private fun handlePointClick(point: LabeledPoint): Boolean {
+    fun handlePointClick(point: LabeledPoint): Boolean {
         // Block all map interactions when Select Code or Collect Point sheets are open
         if (fragment.binding.bottomSheetSelectCode.root.visibility == View.VISIBLE ||
             fragment.binding.bottomSheetCollectPoint.root.visibility == View.VISIBLE) {
@@ -3922,6 +3326,9 @@ class MappingFragmentLogic(
             addPointToEditLine(point)
             return true
         }
+        
+        fragment.selectedPoint = point
+        updateMarkersForZoom(forceRefresh = true)
 
         // If in stakeout mode, hide its UI temporarily
         if (fragment.currentStakeoutMode != StakeoutMode.NONE) {
@@ -3932,91 +3339,23 @@ class MappingFragmentLogic(
         return true
     }
 
-    private fun setupMarkerClickListener(marker: Marker) {
-        marker.setOnMarkerClickListener { clickedMarker: Marker, _: org.osmdroid.views.MapView ->
-            fragment.markerToPointMap[clickedMarker]?.let { point ->
-                handlePointClick(point)
-            } ?: true
-        }
-    }
 
     fun bringLabelsToTop() {
-        val markers = fragment.binding.mapView.overlays.filterIsInstance<Marker>()
-        if (markers.isNotEmpty()) {
-            val nonMarkers = fragment.binding.mapView.overlays.filter { it !is Marker }
-            fragment.binding.mapView.overlays.clear()
-            fragment.binding.mapView.overlays.addAll(nonMarkers)
-            fragment.binding.mapView.overlays.addAll(markers)
+        val style = fragment.mapLibreMap?.style ?: return
+        style.getLayer("points_layer")?.let { layer ->
+            style.removeLayer(layer)
+            style.addLayer(layer)
         }
     }
 
     fun bringLocationMarkerToTop() {
-        fragment.locationMarker?.let {
-            fragment.binding.mapView.overlays.remove(it); fragment.binding.mapView.overlays.add(
-            it
-        )
+        val style = fragment.mapLibreMap?.style ?: return
+        style.getLayer("user_location_layer")?.let { layer ->
+            style.removeLayer(layer)
+            style.addLayer(layer)
         }
     }
 
-    /**
-     * Add a polyline overlay below all markers in the z-order.
-     * This ensures lines render below points as per Figma design.
-     */
-    private fun addPolylineBelowMarkers(overlay: org.osmdroid.views.overlay.Overlay) {
-        val overlays = fragment.binding.mapView.overlays
-        val firstMarkerIndex = overlays.indexOfFirst { it is Marker }
-        if (firstMarkerIndex >= 0) {
-            overlays.add(firstMarkerIndex, overlay)
-        } else {
-            overlays.add(overlay)
-        }
-    }
-
-    fun getVisibleLabelIndices(
-        points: List<LabeledPoint>,
-        projection: org.osmdroid.views.Projection,
-        priorityIndices: Set<Int> = emptySet()
-    ): Set<Int> {
-        if (fragment.binding.mapView.zoomLevelDouble >= fragment.binding.mapView.maxZoomLevel - 0.1) return points.indices.toSet()
-        val visible = mutableSetOf<Int>()
-        val pixelPoints = mutableListOf<Point>()
-        val dens = fragment.resources.displayMetrics.density
-        val oX = fragment.labelOverlapDistanceX * dens
-        val oY = fragment.labelOverlapDistanceY * dens
-        val buf = 100 * dens
-
-        // Pass 1: Process Priority Indices
-        priorityIndices.forEach { i ->
-            if (i in points.indices) {
-                val p = Point(); projection.toPixels(points[i].geoPoint, p)
-                // Priority points (Selected, etc.) always show their label if they are even remotely near the screen
-                // We ignore the actual width/height bounds for priority points to avoid "width=0" issues on first load
-                visible.add(i)
-                pixelPoints.add(p)
-            }
-        }
-
-        // Pass 2: Process Remaining Indices
-        points.indices.forEach { i ->
-            if (priorityIndices.contains(i)) return@forEach // Skip already processed
-
-            val p = Point(); projection.toPixels(points[i].geoPoint, p)
-            val w = fragment.binding.mapView.width
-            val h = fragment.binding.mapView.height
-
-            // If width/height is 0 (first load), skip bounds check for non-priority too to show something
-            if (w > 0 && h > 0) {
-                if (p.x < -buf || p.x > w + buf || p.y < -buf || p.y > h + buf) {
-                    // Offscreen
-                    return@forEach
-                }
-            }
-            if (pixelPoints.none { Math.abs(p.x - it.x) < oX && Math.abs(p.y - it.y) < oY }) {
-                visible.add(i); pixelPoints.add(p)
-            }
-        }
-        return visible
-    }
 
     fun createPointOnlyBitmap(isSelected: Boolean = false): Bitmap {
         val dens = fragment.resources.displayMetrics.density
@@ -4119,23 +3458,15 @@ class MappingFragmentLogic(
     fun setupZoomControls() {
         fragment.binding.imgZoomIn.setOnClickListener {
             hideLineSegmentMenuIfVisible()
-            animateZoom(
-                fragment.binding.mapView.zoomLevelDouble,
-                minOf(
-                    fragment.binding.mapView.zoomLevelDouble + 1,
-                    fragment.binding.mapView.maxZoomLevel
-                )
-            )
+            val currentZoom = fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0
+            val targetZoom = (currentZoom + 1.0).coerceAtMost(fragment.mapLibreMap?.maxZoomLevel ?: 22.0)
+            animateZoom(currentZoom, targetZoom)
         }
         fragment.binding.imgZoomOut.setOnClickListener {
             hideLineSegmentMenuIfVisible()
-            animateZoom(
-                fragment.binding.mapView.zoomLevelDouble,
-                maxOf(
-                    fragment.binding.mapView.zoomLevelDouble - 1,
-                    fragment.binding.mapView.minZoomLevel
-                )
-            )
+            val currentZoom = fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0
+            val targetZoom = (currentZoom - 1.0).coerceAtLeast(fragment.mapLibreMap?.minZoomLevel ?: 0.0)
+            animateZoom(currentZoom, targetZoom)
         }
     }
 
@@ -4143,13 +3474,31 @@ class MappingFragmentLogic(
         fragment.currentMapAnimator?.cancel()
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 150; interpolator = DecelerateInterpolator()
-            addUpdateListener { fragment.binding.mapView.controller.setZoom(from + (to - from) * (it.animatedValue as Float)) }
+            addUpdateListener { 
+                val zoom = (from + (to - from) * (it.animatedValue as Float)).toDouble()
+                fragment.mapLibreMap?.moveCamera(CameraUpdateFactory.zoomTo(zoom)) 
+            }
             fragment.currentMapAnimator = this; start()
         }
     }
 
     fun updateCompassRotation() {
-        fragment.binding.imgCompass.rotation = fragment.binding.mapView.mapOrientation
+        val bearing = fragment.mapLibreMap?.cameraPosition?.bearing ?: 0.0
+        fragment.binding.imgCompass.rotation = -bearing.toFloat()
+    }
+
+    fun animateRotationTo(target: Float) {
+        val map = fragment.mapLibreMap ?: return
+        map.animateCamera(
+            org.maplibre.android.camera.CameraUpdateFactory.bearingTo(target.toDouble()),
+            500,
+            object : org.maplibre.android.maps.MapLibreMap.CancelableCallback {
+                override fun onCancel() {}
+                override fun onFinish() {
+                    updateCompassRotation()
+                }
+            }
+        )
     }
 
     fun setupCompassButton() {
@@ -4159,45 +3508,17 @@ class MappingFragmentLogic(
         }
     }
 
-    fun animateRotationTo(target: Float) {
-        val start = fragment.binding.mapView.mapOrientation
-        var fStart = start % 360f
-        var fEnd = target % 360f
-        if (fEnd - fStart > 180) fEnd -= 360 else if (fEnd - fStart < -180) fEnd += 360
-        ValueAnimator.ofFloat(fStart, fEnd).apply {
-            duration = 500
-            addUpdateListener {
-                val v =
-                    it.animatedValue as Float; fragment.binding.mapView.mapOrientation =
-                v; fragment.binding.imgCompass.rotation =
-                v
-            }
-            start(); fragment.rotationGestureOverlay?.resetRotation()
-        }
-    }
-
     fun setupCenterButton() {
         fragment.binding.imgCenter.setOnClickListener {
             hideLineSegmentMenuIfVisible()
             if (fragment.currentStakeoutMode != StakeoutMode.NONE) return@setOnClickListener
 
-            (fragment.currentLocation ?: fragment.locationMarker?.position)?.let { loc ->
-                if (fragment.collectedLabeledPoints.isEmpty()) {
-                    val rot = fragment.binding.mapView.mapOrientation
-                    cancelOngoingAnimations()
-                    fragment.binding.mapView.zoomToBoundingBox(
-                        BoundingBox(
-                            loc.latitude + 0.0001,
-                            loc.longitude + 0.0001,
-                            loc.latitude - 0.0001,
-                            loc.longitude - 0.0001
-                        ), true, 240, fragment.binding.mapView.maxZoomLevel, 400L
-                    )
-                    fragment.binding.mapView.postDelayed({
-                        fragment.binding.mapView.mapOrientation =
-                            rot; fragment.binding.imgCompass.rotation = rot
-                    }, 50)
-                } else animateToLocationWithZoom(loc, fragment.binding.mapView.zoomLevelDouble)
+            val currentPos = fragment.mapLibreMap?.cameraPosition?.target
+            val targetPos = fragment.lastLocation?.let { org.maplibre.android.geometry.LatLng(it.latitude, it.longitude) } ?: currentPos
+
+            targetPos?.let { pos ->
+                val cameraUpdate = org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(pos, 18.0)
+                fragment.mapLibreMap?.animateCamera(cameraUpdate, 1000)
             }
         }
     }
@@ -4227,65 +3548,27 @@ class MappingFragmentLogic(
     }
 
     private fun fitMapToPoints() {
-        // if (fragment.isMapFitted) return // isMapFitted logic not fully ported/visible here, skipping check to force fit
-
+        val map = fragment.mapLibreMap ?: return
         cancelOngoingAnimations()
 
-        val locationPoint = fragment.currentLocation ?: fragment.locationMarker?.position
+        val locationPoint = fragment.lastLocation?.let { org.maplibre.android.geometry.LatLng(it.latitude, it.longitude) }
+        val points = fragment.collectedLabeledPoints
 
-        if (fragment.collectedLabeledPoints.isEmpty() && locationPoint == null) return
+        if (points.isEmpty() && locationPoint == null) return
 
-        val currentRotation = fragment.binding.mapView.mapOrientation
+        val builder = org.maplibre.android.geometry.LatLngBounds.Builder()
+        locationPoint?.let { builder.include(it) }
+        points.forEach { builder.include(it.latLng) }
 
-        var minLat = Double.MAX_VALUE
-        var maxLat = Double.MIN_VALUE
-        var minLon = Double.MAX_VALUE
-        var maxLon = Double.MIN_VALUE
-
-        fragment.collectedLabeledPoints.forEach { point ->
-            val lat = point.geoPoint.latitude
-            val lon = point.geoPoint.longitude
-            if (lat < minLat) minLat = lat
-            if (lat > maxLat) maxLat = lat
-            if (lon < minLon) minLon = lon
-            if (lon > maxLon) maxLon = lon
-        }
-
-        locationPoint?.let { location ->
-            val lat = location.latitude
-            val lon = location.longitude
-            if (lat < minLat) minLat = lat
-            if (lat > maxLat) maxLat = lat
-            if (lon < minLon) minLon = lon
-            if (lon > maxLon) maxLon = lon
-        }
-
-        // Handle case where we only have one point essentially
-        if (minLat == Double.MAX_VALUE) return // No points
-        if (minLat == maxLat && minLon == maxLon) {
-            // Single point logic
-            animateToLocationWithZoom(
-                GeoPoint(minLat, minLon),
-                fragment.binding.mapView.maxZoomLevel
-            )
-            return
-        }
-
-        val boundingBox = BoundingBox(maxLat, maxLon, minLat, minLon)
-        val padding = 240
-
-        fragment.binding.mapView.post {
-            fragment.binding.mapView.zoomToBoundingBox(
-                boundingBox,
-                true,
-                padding,
-                fragment.binding.mapView.maxZoomLevel,
-                400L
-            )
-            fragment.binding.mapView.postDelayed({
-                fragment.binding.mapView.mapOrientation = currentRotation
-                fragment.binding.imgCompass.rotation = currentRotation
-            }, 50)
+        try {
+            val bounds = builder.build()
+            val cameraUpdate = org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 100)
+            map.animateCamera(cameraUpdate, 1000)
+        } catch (e: Exception) {
+            // If bounds couldn't be built (e.g. no points included)
+            locationPoint?.let {
+                map.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(it, 18.0), 1000)
+            }
         }
     }
 
@@ -4313,7 +3596,11 @@ class MappingFragmentLogic(
             }
 
             if (fragment.binding.bottomSheetLineSegment.root.visibility == View.VISIBLE) {
-                fragment.highlightedLineOverlay?.unhighlight()
+                fragment.highlightedLineOverlay?.let { layerId ->
+                    fragment.mapLibreMap?.let { map ->
+                        MapLibrePolylineHelper.unhighlightPolyline(map, layerId)
+                    }
+                }
                 fragment.highlightedLineOverlay = null
                 fragment.wasCollectingBeforePointDetails = false
                 fragment.selectedPoint = null
@@ -4342,69 +3629,29 @@ class MappingFragmentLogic(
         fragment.isAnimatingLocation = false; fragment.locationUpdateHandler.removeCallbacks(
             fragment.locationSmoothingRunnable
         )
-        fragment.binding.mapView.controller.stopAnimation(false)
+        fragment.mapLibreMap?.cameraPosition // Reading position usually stops standard camera animations
     }
 
-    fun animateToLocationWithZoom(loc: GeoPoint, zoom: Double) {
-        cancelOngoingAnimations()
-        val sLat = fragment.binding.mapView.mapCenter.latitude
-        val sLon = fragment.binding.mapView.mapCenter.longitude
-        val sZ = fragment.binding.mapView.zoomLevelDouble
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 400; interpolator = DecelerateInterpolator()
-            addUpdateListener {
-                val f = it.animatedValue as Float
-                fragment.binding.mapView.controller.setCenter(
-                    GeoPoint(
-                        sLat + (loc.latitude - sLat) * f,
-                        sLon + (loc.longitude - sLon) * f
-                    )
-                )
-                fragment.binding.mapView.controller.setZoom(sZ + (zoom - sZ) * f)
-            }
-            fragment.currentMapAnimator = this; start()
-        }
+    fun animateToLocationWithZoom(loc: LatLng, zoom: Double) {
+        val map = fragment.mapLibreMap ?: return
+        val cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+            .target(loc)
+            .zoom(zoom)
+            .build()
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 400)
     }
 
-    private fun zoomToLine(ls: ClickablePolylineOverlay) {
-        val points = ls.labeledPoints
+    private fun zoomToLine(points: List<LatLng>) {
         if (points.isEmpty()) return
 
-        var minLat = Double.MAX_VALUE
-        var maxLat = Double.MIN_VALUE
-        var minLon = Double.MAX_VALUE
-        var maxLon = Double.MIN_VALUE
-
-        points.forEach { point ->
-            val lat = point.geoPoint.latitude
-            val lon = point.geoPoint.longitude
-            if (lat < minLat) minLat = lat
-            if (lat > maxLat) maxLat = lat
-            if (lon < minLon) minLon = lon
-            if (lon > maxLon) maxLon = lon
-        }
-
-        if (minLat == Double.MAX_VALUE) return
-
-        if (minLat == maxLat && minLon == maxLon) {
-            animateToLocationWithZoom(
-                GeoPoint(minLat, minLon),
-                fragment.binding.mapView.maxZoomLevel
-            )
-            return
-        }
-
-        val boundingBox = BoundingBox(maxLat, maxLon, minLat, minLon)
-        val padding = 240
-
-        fragment.binding.mapView.post {
-            fragment.binding.mapView.zoomToBoundingBox(
-                boundingBox,
-                true,
-                padding,
-                fragment.binding.mapView.maxZoomLevel,
-                400L
-            )
+        val builder = LatLngBounds.Builder()
+        points.forEach { builder.include(it) }
+        
+        try {
+            val bounds = builder.build()
+            fragment.mapLibreMap?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 150))
+        } catch (e: Exception) {
+            // handle empty points
         }
     }
 
@@ -4512,10 +3759,7 @@ class MappingFragmentLogic(
 
     internal fun restoreStateAfterClosingInfoSheet() {
         // 🛑 CRITICAL FIX FOR HANG STATE: Always re-enable map touch explicitly when returning to base state
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>()
-            .forEach { it.isEnabled = true }
-        fragment.binding.mapView.setOnTouchListener(null)
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
         if (fragment.stakeoutSession != null) {
@@ -4529,7 +3773,11 @@ class MappingFragmentLogic(
                 )
             }
         } else if (fragment.isSelectingPointForEditLine && fragment.pendingEditLineSegment != null) {
-            showEditLineBottomSheet(fragment.pendingEditLineSegment!!)
+            val lineId = fragment.pendingEditLineSegment!!
+            val lineWithPoints = viewModel.currentLines.value.find { it.line.id == lineId }
+            if (lineWithPoints != null) {
+                showEditLineBottomSheet(lineWithPoints)
+            }
         } else {
             showBottomNavigation()
         }
@@ -4584,89 +3832,28 @@ class MappingFragmentLogic(
     }
 
     fun setupPointClickHandler() {
-        val protected = mutableListOf<View>()
-        fun collect(v: View) {
-            protected.add(v); if (v is ViewGroup) (0 until v.childCount).forEach {
-                collect(
-                    v.getChildAt(
-                        it
-                    )
-                )
-            }
-        }
-        listOf(
-            fragment.binding.clMenu,
-            fragment.binding.llRightPanel,
-            fragment.binding.imgBack,
-            fragment.binding.imgMenu,
-            fragment.binding.btnCollect,
-            fragment.binding.bottomSheetLineSegment.root,
-            fragment.binding.bottomSheetEditLine.root,
-            fragment.binding.bottomSheetCollectPoint.root,
-            fragment.binding.bottomSheetNewPoint.root,
-            fragment.binding.bottomSheetSelectCode.root,
-            fragment.binding.bottomSheetObjectList.root
-        ).forEach { it?.let { v -> collect(v) } }
-        fragment.pointClickHandlerOverlay =
-            PointClickHandlerOverlay(onPointClick = { geoPoint ->
-                val nearest = findNearestPoint(geoPoint)
-                nearest?.let { handlePointClick(it) } ?: false
-            }, protectedViews = protected)
-        ensurePointClickHandlerAtEnd()
+        // Handled by MapLibre click listener in MappingFragmentHelper
     }
-
+    
     fun preventDoubleTapZoomOnNonMapViews() {
-        val protected = mutableListOf<View>()
-        fun collect(v: View) {
-            protected.add(v); if (v is ViewGroup) (0 until v.childCount).forEach {
-                collect(
-                    v.getChildAt(
-                        it
-                    )
-                )
-            }
-        }
-        listOf(
-            fragment.binding.clMenu,
-            fragment.binding.llRightPanel,
-            fragment.binding.imgBack,
-            fragment.binding.imgMenu,
-            fragment.binding.btnCollect,
-            fragment.binding.bottomSheetLineSegment.root,
-            fragment.binding.bottomSheetEditLine.root,
-            fragment.binding.bottomSheetCollectPoint.root,
-            fragment.binding.bottomSheetNewPoint.root,
-            fragment.binding.bottomSheetSelectCode.root,
-            fragment.binding.bottomSheetObjectList.root
-        ).forEach { it?.let { v -> collect(v) } }
-
-        fragment.doubleTapInterceptorOverlay = DoubleTapInterceptorOverlay(protected)
-        fragment.binding.mapView.overlays.add(fragment.doubleTapInterceptorOverlay)
+        // Handled natively
     }
 
     fun ensurePointClickHandlerAtEnd() {
-        fragment.pointClickHandlerOverlay?.let {
-            fragment.binding.mapView.overlays.remove(it); fragment.binding.mapView.overlays.add(
-            it
-        )
-        }
+        // Handled by MapLibre
     }
 
-    fun findNearestPoint(geo: GeoPoint): LabeledPoint? {
-        val proj = fragment.binding.mapView.projection
-        val p = Point(); proj.toPixels(geo, p)
+    fun findNearestPoint(geo: LatLng): LabeledPoint? {
+        val map = fragment.mapLibreMap ?: return null
+        val proj = map.projection
+        val p = proj.toScreenLocation(geo)
         val density = fragment.resources.displayMetrics.density
-        val pointTol = 24f * density // 24dp tolerance (48dp touch target) for precision
         var best: LabeledPoint? = null
         var minD = Float.MAX_VALUE
 
         // Find nearest point
         fragment.collectedLabeledPoints.forEach { pt ->
-            // Prevent selection of "ghost" points hidden by zoom clustering
-            val isVisible = pointMarkersCache[pt.id]?.pointMarker?.isEnabled ?: true
-            if (!isVisible) return@forEach
-
-            val pp = Point(); proj.toPixels(pt.geoPoint, pp)
+            val pp = proj.toScreenLocation(pt.latLng)
             val dx = p.x - pp.x
             val dy = p.y - pp.y
             val d = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
@@ -4676,39 +3863,8 @@ class MappingFragmentLogic(
         }
 
         if (best != null) {
-            var minLineDist = Float.MAX_VALUE
-            // Find nearest line
-            fragment.completedLineOverlays.forEach { overlay ->
-                if (overlay is ClickablePolylineOverlay) {
-                    val dist = overlay.distanceToPolyline(
-                        fragment.binding.mapView,
-                        p.x.toFloat(),
-                        p.y.toFloat()
-                    )
-                    if (dist < minLineDist) {
-                        minLineDist = dist
-                    }
-                }
-            }
-
-            // SMART SELECTION LOGIC
-            
             // Case 1: Point is a solid/direct hit (within 24dp)
-            // We ALWAYS prefer the point, UNLESS the line is substantially closer.
-            // Example: tap is 23dp from point, but 2dp from line -> pick line.
             if (minD <= 24f * density) {
-                if (minLineDist <= 10f * density && minD > minLineDist + 10f * density) {
-                    return null // User definitively hit the line, let line overlay handle it
-                }
-                return best
-            }
-
-            // Case 2: Point is a sloppy hit (between 25dp and 35dp)
-            // We pick the point only if the line isn't closer.
-            if (minD <= pointTol) {
-                if (minLineDist < minD) {
-                    return null // Line is closer, let line overlay handle it
-                }
                 return best
             }
         }
@@ -4718,8 +3874,9 @@ class MappingFragmentLogic(
 
 
     fun updateLiveTrackingLine() {
-        fragment.liveTrackingLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
+        val map = fragment.mapLibreMap ?: return
+        fragment.liveTrackingLineOverlay?.let { layerId ->
+            MapLibrePolylineHelper.removePolyline(map, layerId as String)
         }
         fragment.liveTrackingLineOverlay = null
 
@@ -4732,25 +3889,26 @@ class MappingFragmentLogic(
         val lineCodePoints = getConsecutiveLineCodePoints()
 
         if (lineCodePoints.isNotEmpty()) {
-            val referencePoint = if (fragment.addFromBeginning) {
-                lineCodePoints.first().geoPoint
+            val referenceLatLng = if (fragment.addFromBeginning) {
+                lineCodePoints.first().latLng
             } else {
-                lineCodePoints.last().geoPoint
+                lineCodePoints.last().latLng
             }
-            val currentMarkerPosition =
-                fragment.locationMarker?.position ?: fragment.currentLocation
+            val currentLatLng = fragment.currentLocation
 
-            if (currentMarkerPosition != null && referencePoint != currentMarkerPosition && !fragment.isShapeClosed) {
-                val primaryColor =
-                    ContextCompat.getColor(fragment.requireContext(), R.color.primary)
-                fragment.liveTrackingLineOverlay = OsmdroidPolylineHelper.createPolyline(
-                    fragment.binding.mapView,
-                    listOf(referencePoint, currentMarkerPosition),
+            if (currentLatLng != null && referenceLatLng != currentLatLng && !fragment.isShapeClosed) {
+                val primaryColor = ContextCompat.getColor(fragment.requireContext(), R.color.primary)
+                val layerId = "layer_live_tracking"
+                MapLibrePolylineHelper.addPolyline(
+                    map,
+                    layerId,
+                    listOf(referenceLatLng, currentLatLng),
                     primaryColor,
                     6f,
-                    closed = false,
-                    dashed = true
+                    isClosed = false,
+                    isDashed = true
                 )
+                fragment.liveTrackingLineOverlay = layerId
             }
         }
 
@@ -4759,40 +3917,6 @@ class MappingFragmentLogic(
         ensurePointClickHandlerAtEnd()
     }
 
-    fun initializeMap() {
-        fragment.binding.mapView.apply {
-            setTileSource(TileSourceFactory.MAPNIK); setMultiTouchControls(true); minZoomLevel =
-            2.0; maxZoomLevel = 25.0; isHorizontalMapRepetitionEnabled =
-            true; isVerticalMapRepetitionEnabled = false; isTilesScaledToDpi =
-            true; setBuiltInZoomControls(false)
-            setScrollableAreaLimitDouble(BoundingBox(85.0, 180.0, -85.0, -180.0))
-            addMapListener(object : MapListener {
-                override fun onScroll(e: ScrollEvent?): Boolean {
-                    fragment.isMapFitted = false; updateCompassRotation(); return false
-                }
-
-                override fun onZoom(e: ZoomEvent?): Boolean {
-                    fragment.isMapFitted = false
-                    e?.let {
-                        if (Math.abs(it.zoomLevel - fragment.lastZoomLevel) > 0.5) {
-                            fragment.lastZoomLevel = it.zoomLevel; post { updateMarkersForZoom() }
-                        }
-                    }
-                    updateCompassRotation(); return false
-                }
-            })
-        }
-        fragment.mapController =
-            fragment.binding.mapView.controller.apply { setZoom(15.0) }; fragment.lastZoomLevel =
-            15.0
-        fragment.rotationGestureOverlay = RotationGestureOverlay(fragment.binding.mapView).also {
-            fragment.binding.mapView.overlays.add(
-                0,
-                it
-            )
-        }
-        createLocationPin()
-    }
 
 
     fun setupSwipeToDismiss(view: View, onDismiss: () -> Unit) {
@@ -4803,11 +3927,11 @@ class MappingFragmentLogic(
         var startTranslationY = 0f
         var viewHeight = 0f
 
-        val gestureListener = View.OnTouchListener(fun(v: View, event: MotionEvent): Boolean {
+        val gestureListener = View.OnTouchListener { v, event ->
             // If the view can scroll up (i.e. we are not at the top), let it handle the event
-            if (v.canScrollVertically(-1) && !isDragging) return false
+            if (v.canScrollVertically(-1) && !isDragging) return@OnTouchListener false
 
-            return when (event.action) {
+            return@OnTouchListener when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialY = event.rawY
                     initialX = event.rawX
@@ -4840,9 +3964,10 @@ class MappingFragmentLogic(
                         val maxTranslation = viewHeight * 0.01f // Max drag down is 1%
 
                         view.translationY = newTranslation.coerceIn(minTranslation, maxTranslation)
-                        return true // Consume the event while dragging
+                        true // Consume the event while dragging
+                    } else {
+                        false
                     }
-                    false
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -4868,15 +3993,16 @@ class MappingFragmentLogic(
                         }
 
                         isDragging = false
-                        return true
+                        true
+                    } else {
+                        isDragging = false
+                        false
                     }
-                    isDragging = false
-                    false
                 }
 
                 else -> false
             }
-        })
+        }
 
         fun attachListenerRecursively(v: View) {
             // Attach to everything to enable swipe everywhere
@@ -4906,6 +4032,7 @@ class MappingFragmentLogic(
         fragment.locationCallback = object : LocationCallback() {
             override fun onLocationResult(res: LocationResult) {
                 res.lastLocation?.let {
+                    fragment.lastLocation = it
                     updateLocationMarker(it.latitude, it.longitude, it.altitude)
 
                     // Stakeout Update - Handled in smoothMoveToTarget for sync
@@ -4918,7 +4045,7 @@ class MappingFragmentLogic(
                     if (fragment.isFirstLocationUpdate) {
                         fragment.isFirstLocationUpdate = false
                         animateToLocationWithZoom(
-                            GeoPoint(it.latitude, it.longitude, it.altitude),
+                            LatLng(it.latitude, it.longitude, it.altitude),
                             18.0
                         )
                     } else if (fragment.isLockMode) {
@@ -4942,32 +4069,30 @@ class MappingFragmentLogic(
     }
 
     fun updateLocationMarker(lat: Double, lon: Double, alt: Double) {
-        val newLocation = GeoPoint(lat, lon, alt)
+        val newLocation = LatLng(lat, lon, alt)
 
-        if (fragment.locationMarker == null) {
+        if (fragment.currentLocation == null) {
             fragment.currentLocation = newLocation
             fragment.targetLocation = newLocation
             createLocationPin()
-            fragment.locationMarker?.position = newLocation
 
-            if (fragment.isFirstLocationUpdate && fragment.mapController != null) {
+            if (fragment.isFirstLocationUpdate) {
                 fragment.binding.mapView.post { fitMapToPoints() }
                 fragment.isFirstLocationUpdate = false
             }
             return
         }
 
-        if (fragment.isFirstLocationUpdate && fragment.mapController != null) {
+        if (fragment.isFirstLocationUpdate) {
             fragment.currentLocation = newLocation
             fragment.targetLocation = newLocation
-            fragment.locationMarker?.position = newLocation
+            fragment.mapLibreMap?.let { MapLibreMarkerHelper.updateLocationMarker(it, newLocation, "location_pin_icon") }
             fragment.binding.mapView.post { fitMapToPoints() }
             fragment.isFirstLocationUpdate = false
             return
         }
 
         fragment.targetLocation = newLocation
-        // fragment.currentLocation = newLocation // Handled in smoothMoveToTarget for sync
 
         if (getConsecutiveLineCodePoints().isNotEmpty()) {
             updateLiveTrackingLine()
@@ -4983,8 +4108,7 @@ class MappingFragmentLogic(
 
     fun smoothMoveToTarget() {
         val target = fragment.targetLocation ?: return
-        val marker = fragment.locationMarker ?: return
-        val currentPos = marker.position ?: return
+        val currentPos = fragment.currentLocation ?: target
 
         val smoothingFactor = 0.15
 
@@ -4993,10 +4117,12 @@ class MappingFragmentLogic(
             currentPos.longitude + (target.longitude - currentPos.longitude) * smoothingFactor
         val newAlt = currentPos.altitude + (target.altitude - currentPos.altitude) * smoothingFactor
 
-        val smoothedPosition = GeoPoint(newLat, newLon, newAlt)
-        marker.position = smoothedPosition
-        fragment.currentLocation =
-            smoothedPosition // Update currentLocation to match smoothed for distance calcs
+        val smoothedPosition = LatLng(newLat, newLon, newAlt)
+        fragment.currentLocation = smoothedPosition
+        
+        fragment.mapLibreMap?.let { map ->
+            MapLibreMarkerHelper.updateLocationMarker(map, smoothedPosition, "location_pin_icon")
+        }
 
         if (fragment.stakeoutSession != null) {
             updateStakeoutMeasurements(newLat, newLon, newAlt)
@@ -5005,12 +4131,13 @@ class MappingFragmentLogic(
         updateLiveTrackingLine()
 
         bringLocationMarkerToTop()
-        fragment.binding.mapView.invalidate()
 
-        val distance = smoothedPosition.distanceToAsDouble(target)
+        val distance = smoothedPosition.distanceTo(target)
         if (distance < 0.01) {
-            marker.position = target
-            fragment.binding.mapView.invalidate()
+            fragment.currentLocation = target
+            fragment.mapLibreMap?.let { map ->
+                MapLibreMarkerHelper.updateLocationMarker(map, target, "location_pin_icon")
+            }
         }
     }
 
@@ -5021,6 +4148,8 @@ class MappingFragmentLogic(
 
     fun updatePinBitmap() {
         if (!fragment.isAdded || fragment.context == null) return
+        val map = fragment.mapLibreMap ?: return
+        
         val dens = fragment.resources.displayMetrics.density
         val base = 60 * dens
         val pad = base * 0.25f
@@ -5032,26 +4161,17 @@ class MappingFragmentLogic(
             fragment.currentPinText,
             fragment.currentHeading
         ).apply { setBounds(0, 0, base.toInt(), base.toInt()); draw(canv) }
-        val icon = BitmapDrawable(fragment.resources, bm)
-        val aY = (base * 0.70f + pad) / s
-        if (fragment.locationMarker == null) {
-            fragment.locationMarker = Marker(fragment.binding.mapView).apply {
-                this.icon = icon; setAnchor(
-                0.5f,
-                aY
-            ); infoWindow = null; setOnMarkerClickListener { mk, _ ->
-                findNearestPoint(mk.position)?.let {
-                    showPointDetailsBottomSheet(
-                        it
-                    )
-                }; true
+        
+        // We add the icon to the map style
+        map.getStyle { style ->
+            style.addImage("location_pin_icon", bm)
+            
+            // If location exists, update or add the marker
+            fragment.lastLocation?.let { location ->
+                val latLng = org.maplibre.android.geometry.LatLng(location.latitude, location.longitude)
+                MapLibreMarkerHelper.updateLocationMarker(map, latLng, "location_pin_icon")
             }
-            }
-            fragment.binding.mapView.overlays.add(fragment.locationMarker)
-        } else {
-            fragment.locationMarker?.icon = icon; fragment.locationMarker?.setAnchor(0.5f, aY)
         }
-        fragment.binding.mapView.invalidate()
     }
 
     fun updatePinText(newText: String) {
@@ -5466,7 +4586,7 @@ class MappingFragmentLogic(
         recursiveAttacher.attach(v)
     }
 
-fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBinding) {
+    private fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBinding) {
         val swipeThresholdPx = 12f
         var startY = 0f
         var infoVisible = b.nsvInfo.visibility == View.VISIBLE
@@ -5508,10 +4628,21 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 b.llPointLineInfo.visibility = View.VISIBLE
                 b.clLineInfo.visibility = View.VISIBLE
                 b.clPointInfo.visibility = View.GONE
-                fragment.highlightedLineOverlay?.let { line ->
-                    b.tvCodeIdInfo.text = line.codeId.ifEmpty { "No Code" }
-                    b.txtPointInfo.text = "${line.pointCount}"
-                    b.txtDistanceInfo.text = String.format("%.2f M", line.length)
+                fragment.highlightedLineOverlay?.let { layerId ->
+                    val lineId = layerId.removePrefix("layer_line_")
+                    val lineWithPoints = viewModel.currentLines.value.find { it.line.id == lineId }
+                    lineWithPoints?.let { l ->
+                        b.tvCodeIdInfo.text = l.line.id.ifEmpty { "No Code" }
+                        b.txtPointInfo.text = "${l.points.size}"
+                        var length = 0.0
+                        if (l.points.size >= 2) {
+                            for (i in 0 until l.points.size - 1) {
+                                length += LatLng(l.points[i].latitude, l.points[i].longitude)
+                                    .distanceTo(LatLng(l.points[i+1].latitude, l.points[i+1].longitude))
+                            }
+                        }
+                        b.txtDistanceInfo.text = String.format("%.2f M", length)
+                    }
                 }
             } else if (isPointMode) {
                 b.llPointLineInfo.visibility = View.VISIBLE
@@ -5740,8 +4871,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             anim.interpolator = FastOutSlowInInterpolator()
                             anim.start()
 
-                            fragment.binding.mapView.setMultiTouchControls(true)
-                            fragment.binding.mapView.setOnTouchListener(null)
+                            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
+                            
                             fragment.binding.llMapsButtons.visibility = View.VISIBLE
                         } else {
                             // Expand
@@ -5763,8 +4894,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
                             // Disable map buttons only if it's very tall
                             if (fullHeight > parentHeight * 0.5) {
-                                fragment.binding.mapView.setMultiTouchControls(false)
-                                fragment.binding.mapView.setOnTouchListener { _, _ -> true }
+                                fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(false)
                                 fragment.binding.llMapsButtons.visibility = View.GONE
                             }
                         }
@@ -5890,8 +5020,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             anim.interpolator = FastOutSlowInInterpolator()
                             anim.start()
 
-                            fragment.binding.mapView.setMultiTouchControls(true)
-                            fragment.binding.mapView.setOnTouchListener(null)
+                            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
+                            
                             fragment.binding.llMapsButtons.visibility = View.VISIBLE
                         } else {
                             val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
@@ -5905,8 +5035,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             anim.start()
 
                             if (fullHeight > parentHeight * 0.5) {
-                                fragment.binding.mapView.setMultiTouchControls(false)
-                                fragment.binding.mapView.setOnTouchListener { _, _ -> true }
+                                fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(false)
                                 fragment.binding.llMapsButtons.visibility = View.GONE
                             }
                         }
@@ -5977,11 +5106,16 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
     private fun setMapTouchForLineSegment(blockMap: Boolean) {
         val lineSheet = fragment.binding.bottomSheetLineSegment
-        fragment.binding.mapView.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN && lineSheet.clLineMenu.visibility == View.VISIBLE) {
-                hidePointLineSelection(lineSheet)
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(!blockMap)
+        // Note: MapLibre doesn't easily support a "dismiss on any touch" while blocked, 
+        // but we can use the click listener if gestures are enabled.
+        if (!blockMap) {
+            fragment.mapLibreMap?.addOnMapClickListener {
+                if (lineSheet.clLineMenu.visibility == View.VISIBLE) {
+                    hidePointLineSelection(lineSheet)
+                }
+                true
             }
-            blockMap
         }
     }
 
@@ -6016,7 +5150,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
     }
 
     fun showEditLineBottomSheet(
-        ls: ClickablePolylineOverlay,
+        lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         isRestoring: Boolean = false
     ) = hideMenu {
@@ -6025,30 +5159,19 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         }
         android.util.Log.d(
             "MappingLogic",
-            "showEditLineBottomSheet called for codeId: ${ls.codeId}"
+            "showEditLineBottomSheet called for codeId: ${lineWithPoints.line.id}"
         )
 
-        fragment.pendingEditLineSegment = ls
-        // Remove original line while editing so only the edit preview is visible.
-        if (fragment.binding.mapView.overlays.contains(ls)) {
-            fragment.binding.mapView.overlays.remove(ls)
-        }
+        fragment.pendingEditLineSegment = lineWithPoints.line.id
+        reconstructPolylines() // Refresh to hide the line being edited
         // Also remove any stale overlays with the same code to avoid double-rendering while reordering.
-        val staleSameCodeOverlays =
-            fragment.binding.mapView.overlays.filterIsInstance<ClickablePolylineOverlay>()
-                .filter { it.codeId == ls.codeId }
-                .toList()
-        staleSameCodeOverlays.forEach { fragment.binding.mapView.overlays.remove(it) }
-        fragment.binding.mapView.invalidate()
-
-        // Hide bottom navigation first before hiding collect point sheet
-        hideBottomNavigation()
+        // Remove existing highlight
+        fragment.highlightedLineOverlay?.let { layerId ->
+            fragment.mapLibreMap?.let { m -> MapLibrePolylineHelper.unhighlightPolyline(m, layerId as String) }
+        }
+        fragment.highlightedLineOverlay = null
 
         hideCollectPointBottomSheet(finalizeSegment = false, showNav = false)
-        if (!isRestoring) {
-            fragment.highlightedLineOverlay?.unhighlight()
-            fragment.highlightedLineOverlay = null
-        }
         updateMarkersForZoom(forceRefresh = true)
 
         // Execute Show Logic IMMEDIATELY
@@ -6062,17 +5185,22 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
         // Capture original state for revert-on-cancel ONLY if starting a fresh session
         if (!isRestoring && originalEditLineState == null) {
-            originalEditLineState = ls.labeledPoints.toList()
-            originalEditLineCodeId = ls.codeId
-            originalEditLineFeatureCode = ls.featureCode
+            originalEditLineState = lineWithPoints.points.map { it.toLabeledPoint() }
+            originalEditLineCodeId = lineWithPoints.line.id
+            originalEditLineFeatureCode = lineWithPoints.line.code
         }
         if (!isRestoring) isEditLineSaved = false
 
-        val points = ls.labeledPoints.toMutableList()
+        // Resolve PointEntity -> LabeledPoint using the main list
+        val pointLookup = fragment.collectedLabeledPoints.associateBy { it.id }
+        val points = lineWithPoints.points.mapNotNull { pointEntity ->
+            pointLookup[pointEntity.id]
+        }.toMutableList()
+
         sheetBinding.tvCodeDescription.text =
-            getCodeDescription(ls.codeId).ifEmpty { "No code" }
-        sheetBinding.tvCodeId.text = ls.codeId.ifEmpty { "" }
-        sheetBinding.cbClosedLine.isChecked = ls.isClosed
+            getCodeDescription(lineWithPoints.line.id).ifEmpty { "No code" }
+        sheetBinding.tvCodeId.text = lineWithPoints.line.id.ifEmpty { "" }
+        sheetBinding.cbClosedLine.isChecked = lineWithPoints.line.isClosed
         val canClose = points.size >= 3
         sheetBinding.cbClosedLine.isEnabled = canClose
         val colorRes = if (canClose) R.color.text_primary else R.color.neutral_dark
@@ -6174,6 +5302,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             override fun isLongPressDragEnabled() = false
         })
 
+        fragment.pendingEditLineSegment = lineWithPoints.line.id
+        
         val adapter = EditPointAdapter(points, onRemoveClick = { pos ->
             val cur = sheetBinding.rvPoints.adapter as? EditPointAdapter
             if (cur != null && cur.itemCount > 2) {
@@ -6217,7 +5347,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
         sheetBinding.tvAddPoint.setOnClickListener {
             fragment.isSelectingPointForEditLine = true
-            fragment.pendingEditLineSegment = ls
+            fragment.pendingEditLineSegment = lineWithPoints.line.id
             // Keep edit line sheet visible underneath; slide object list above it
             showObjectListBottomSheetInternalForEditLine(BottomSheetTransition.SLIDE_UP)
         }
@@ -6237,9 +5367,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     return@showSelectCodeBottomSheet
                 }
                 // Update the overlay's code ID
-                val oldCodeId = ls.codeId
-                ls.codeId = codeId
-                ls.featureCode = codeId.filter { it.isLetter() }.ifEmpty { "L" }
+                val oldCodeId = fragment.pendingEditLineSegment ?: ""
+                fragment.pendingEditLineSegment = codeId
                 updatePointIdFromSelectedCode(codeId)
 
                 // Update all associated points in local list
@@ -6251,8 +5380,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
                 // Update edit line UI if visible
                 fragment.currentEditLineBinding?.let { b ->
-                    b.tvCodeId.text = ls.codeId.ifEmpty { "" }
-                    b.tvCodeDescription.text = getCodeDescription(ls.codeId).ifEmpty { "No code" }
+                    b.tvCodeId.text = codeId.ifEmpty { "" }
+                    b.tvCodeDescription.text = getCodeDescription(codeId).ifEmpty { "No code" }
                 }
                 updateEditLineOverlay()
             }
@@ -6269,70 +5398,48 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 isEditLineSaved = true // Mark as saved to prevent revert
                 val reordered = cur.getPoints()
                 val isClosed = sheetBinding.cbClosedLine.isChecked
-                val gps = reordered.map { it.geoPoint }
+                val latLngs = reordered.map { it.latLng }
                 var dist = 0.0
-                for (i in 0 until gps.size - 1) dist += gps[i].distanceToAsDouble(gps[i + 1])
-                if (isClosed) dist += gps.last().distanceToAsDouble(gps.first())
+                for (i in 0 until latLngs.size - 1) dist += latLngs[i].distanceTo(latLngs[i + 1])
+                if (isClosed && latLngs.size >= 3) dist += latLngs.last().distanceTo(latLngs.first())
 
-                val wasHigh = fragment.highlightedLineOverlay == ls
-                val ptsCorrected =
-                    reordered.map { if (it.codeId != ls.codeId) it.copy(codeId = ls.codeId) else it }
-                val toReorder =
-                    fragment.collectedLabeledPoints.filter { pt -> ptsCorrected.any { it.id == pt.id } }
+                val currentLineId = fragment.pendingEditLineSegment ?: ""
+                val ptsCorrected = reordered.map { if (it.codeId != currentLineId) it.copy(codeId = currentLineId) else it }
+                
+                // Update local list
+                val toReorder = fragment.collectedLabeledPoints.filter { pt -> ptsCorrected.any { it.id == pt.id } }
                 if (toReorder.isNotEmpty()) {
-                    val firstIdx =
-                        fragment.collectedLabeledPoints.indexOfFirst { pt -> toReorder.any { it.id == pt.id } }
+                    val firstIdx = fragment.collectedLabeledPoints.indexOfFirst { pt -> toReorder.any { it.id == pt.id } }
                     fragment.collectedLabeledPoints.removeAll(toReorder.toSet())
                     fragment.collectedLabeledPoints.addAll(firstIdx, ptsCorrected)
                 }
 
                 // Save to Database
-                val projectId = fragment.viewModel.currentProjectId.value
-                if (projectId == null) {
-                    Toast.makeText(
-                        fragment.requireContext(),
-                        "Error: No active project",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@setOnClickListener
-                }
-
-                val featureCode = ls.featureCode
+                val projectId = viewModel.currentProjectId.value ?: 1L
+                val featureCode = currentLineId.filter { it.isLetter() }.ifEmpty { "L" }
                 val lineEntity = LineEntity(
                     projectId = projectId,
-                    id = ls.codeId,
+                    id = currentLineId,
                     code = featureCode,
                     isClosed = isClosed,
                     length = dist
                 )
                 val pointEntities = ptsCorrected.map { it.toPointEntity(projectId) }
-                fragment.viewModel.saveLine(lineEntity, pointEntities)
+                viewModel.saveLine(lineEntity, pointEntities)
 
-                // Handle removed points: explicitly save them with empty code AND update local state
+                // Handle removed points
                 val originalPoints = originalEditLineState ?: emptyList()
-//                val removedPoints =
-//                    originalPoints.filter { original -> ptsCorrected.none { it.id == original.id } }
-                val removedPoints: List<LabeledPoint> =
-                    originalPoints.filter { original: LabeledPoint -> ptsCorrected.none { corrected: LabeledPoint -> corrected.id == original.id } }
+                val removedPoints = originalPoints.filter { original -> ptsCorrected.none { it.id == original.id } }
                 removedPoints.forEach { removed ->
                     val updatedPoint = removed.copy(codeId = "").toPointEntity(projectId)
-                    fragment.viewModel.savePoint(updatedPoint)
+                    viewModel.savePoint(updatedPoint)
 
-                    // Update local state so map refreshes correctly
+                    // Update local state
                     val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == removed.id }
                     if (idx >= 0) {
                         fragment.collectedLabeledPoints[idx] =
                             fragment.collectedLabeledPoints[idx].copy(codeId = "")
                     }
-                }
-
-                // Update local collectedLines state to prevent reconstructPolylines from using stale data
-                val updatedLineWithPoints = LineWithPoints(
-                    line = lineEntity,
-                    points = pointEntities
-                )
-                collectedLines = collectedLines.map {
-                    if (it.line.id == ls.codeId) updatedLineWithPoints else it
                 }
 
                 Toast.makeText(
@@ -6341,65 +5448,20 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     Toast.LENGTH_SHORT
                 ).show()
 
-                val staleSavedOverlays =
-                    fragment.completedLineOverlays.filterIsInstance<ClickablePolylineOverlay>()
-                        .filter { it.codeId == ls.codeId }
-                        .toList()
-                staleSavedOverlays.forEach {
-                    OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-                }
-                fragment.completedLineOverlays.removeAll(staleSavedOverlays.toSet())
-
-                // Also remove the temporary edit overlay if it exists
-                if (fragment.highlightedLineOverlay != null && fragment.highlightedLineOverlay != ls) {
-                    fragment.binding.mapView.overlays.remove(fragment.highlightedLineOverlay)
-                }
+                // Cleanup preview overlays
+                val map = fragment.mapLibreMap
+                fragment.highlightedLineOverlay?.let { map?.let { m -> MapLibrePolylineHelper.removePolyline(m, it as String) } }
                 fragment.highlightedLineOverlay = null
-                fragment.closingSegmentOverlay?.let {
-                    fragment.binding.mapView.overlays.remove(it)
-                }
+                fragment.closingSegmentOverlay?.let { map?.let { m -> MapLibrePolylineHelper.removePolyline(m, it as String) } }
                 fragment.closingSegmentOverlay = null
 
-                val updated = ClickablePolylineOverlay(
-                    gps,
-                    ContextCompat.getColor(fragment.requireContext(), R.color.slate_gray_light),
-                    6f,
-                    closed = isClosed
-                ).apply {
-                    this.codeId = ls.codeId; this.featureCode = featureCode; pointCount =
-                    ptsCorrected.size; length =
-                    dist; labeledPoints = ptsCorrected; this.isClosed = isClosed
-                    setOnClickListener { handleLineSegmentClick(this) }
-                }
-                addPolylineBelowMarkers(updated)
-                fragment.completedLineOverlays.add(updated)
-                ensurePointClickHandlerAtEnd(); updateMarkersForZoom(); bringLocationMarkerToTop()
-                if (wasHigh) {
-                    updated.highlight(
-                        ContextCompat.getColor(
-                            fragment.requireContext(),
-                            R.color.primary
-                        )
-                    ); fragment.highlightedLineOverlay = updated
-                }
-                fragment.binding.mapView.invalidate()
-                fragment.binding.mapView.invalidate()
-
-                // Reset tracking state to prevent live tracking line from connecting to these points
-                fragment.lineSegmentStartIndex = fragment.collectedLabeledPoints.size
-                fragment.liveTrackingLineOverlay?.let {
-                    OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-                }
-                fragment.liveTrackingLineOverlay = null
-
-            } else {
-                Toast.makeText(
-                    fragment.requireContext(),
-                    "A line must have at least 2 points",
-                    Toast.LENGTH_SHORT
-                ).show(); return@setOnClickListener
+                updateMarkersForZoom(forceRefresh = true)
+                hideEditLineBottomSheet()
+                
+                // Refresh map to show the saved line (it was hidden during edit)
+                fragment.pendingEditLineSegment = null
+                reconstructPolylines()
             }
-            hideEditLineBottomSheet()
         }
 
         sheetBinding.btnCloseEditLine.setOnClickListener {
@@ -6437,8 +5499,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         editLineLayoutListener?.let {
             sheetBinding.root.viewTreeObserver.removeOnGlobalLayoutListener(it)
         }
-        val listener = object :
-            ViewTreeObserver.OnGlobalLayoutListener {
+        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
             private var wasOpened = false
             private var savedHeight = 0
 
@@ -6454,70 +5515,25 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 val screenHeight = sheetBinding.root.rootView.height
                 val keypadHeight = screenHeight - r.bottom
 
-                if (keypadHeight > screenHeight * 0.15) { // Keyboard is open
+                if (keypadHeight > screenHeight * 0.15) { // Keyboard open
                     if (!wasOpened) {
-                        // Expand only the list height with smooth animation
-                        val parentHeight = (sheetBinding.root.parent as? View)?.height ?: screenHeight
-                        val baseMargin = (25 * fragment.resources.displayMetrics.density).toInt()
-                        val fullHeight = parentHeight - (statusBarHeight + baseMargin + 200) // approx room for footer/header
-
-                        val lp = sheetBinding.rvPoints.layoutParams
-                        if (savedHeight == 0) savedHeight = lp.height
-                        val currentHeight = lp.height
-
-                        val anim = ValueAnimator.ofInt(currentHeight, fullHeight)
-                        anim.addUpdateListener { va ->
-                            val params = sheetBinding.rvPoints.layoutParams
-                            params.height = va.animatedValue as Int
-                            sheetBinding.rvPoints.layoutParams = params
-                        }
-                        anim.duration = 100
-                        anim.interpolator = FastOutSlowInInterpolator()
-                        anim.start()
-
                         wasOpened = true
-                        // ... map touch logic ...
-                        fragment.binding.mapView.setMultiTouchControls(false)
-                        fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>()
-                            .forEach { it.isEnabled = false }
-                        fragment.binding.mapView.setOnTouchListener { _, _ -> true }
-                        fragment.binding.llMapsButtons.visibility = View.GONE
+                        savedHeight = sheetBinding.root.height
+                        sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+                        sheetBinding.root.requestLayout()
                     }
-                } else { // Keyboard is closed
+                } else { // Keyboard closed
                     if (wasOpened) {
-                        val lp = sheetBinding.rvPoints.layoutParams
-                        val collapsedHeight = if (savedHeight > 0) savedHeight else (170 * fragment.resources.displayMetrics.density).toInt()
-                        val currentHeight = lp.height
-
-                        val anim = ValueAnimator.ofInt(currentHeight, collapsedHeight)
-                        anim.addUpdateListener { va ->
-                            val params = sheetBinding.rvPoints.layoutParams
-                            params.height = va.animatedValue as Int
-                            sheetBinding.rvPoints.layoutParams = params
-                        }
-                        anim.duration = 100
-                        anim.interpolator = FastOutSlowInInterpolator()
-                        anim.start()
-
                         wasOpened = false
-                        // ... re-enable map logic ...
-                        fragment.binding.mapView.setMultiTouchControls(true)
-                        fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>()
-                            .forEach { it.isEnabled = true }
-                        fragment.binding.mapView.setOnTouchListener(null)
-                        fragment.binding.llMapsButtons.visibility = View.VISIBLE
+                        sheetBinding.root.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        sheetBinding.root.requestLayout()
                     }
-                    // Ensure bottom nav stays hidden while sheet is visible (keyboard closed)
-                    hideBottomNavigation()
                 }
             }
         }
-        editLineLayoutListener = listener
         sheetBinding.root.viewTreeObserver.addOnGlobalLayoutListener(listener)
-
-        // Do NOT adjust sidebar for edit line sheet - sidebar should stay in place
+        editLineLayoutListener = listener
     }
-
     fun hideEditLineBottomSheet(
         showNav: Boolean = true,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_DOWN,
@@ -6527,17 +5543,12 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         if (!fragment.isSelectingPointForEditLine) {
             if (!isEditLineSaved && originalEditLineState != null) {
                 val originalPoints = originalEditLineState!!
-                val lineForRevert = fragment.pendingEditLineSegment ?: fragment.highlightedLineOverlay
-                val lineCodeForRevert = originalEditLineCodeId ?: lineForRevert?.codeId ?: ""
+                val lineIdForRevert = fragment.pendingEditLineSegment ?: ""
+                val lineCodeForRevert = originalEditLineCodeId ?: lineIdForRevert
                 val originalIds = originalPoints.map { it.id }.toSet()
-                val dirtyPoints =
-                    fragment.currentEditLineAdapter?.getPoints()
-                        ?: fragment.highlightedLineOverlay?.labeledPoints
-                        ?: lineForRevert?.labeledPoints
-                        ?: emptyList()
+                val dirtyPoints = fragment.currentEditLineAdapter?.getPoints() ?: emptyList()
 
                 // 1. Detach points that were added (in dirty but not in original)
-                // These points were given the line code, so we must strip it
                 dirtyPoints.forEach { pt ->
                     if (pt.id !in originalIds) {
                         val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == pt.id }
@@ -6549,22 +5560,12 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 }
 
                 // 2. Re-attach points that were removed (in original but maybe not in dirty)
-                // These points lost the line code, so we must restore it
                 originalPoints.forEach { pt ->
                     val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == pt.id }
                     if (idx >= 0) {
-                        // Restore codeId to line's code
                         fragment.collectedLabeledPoints[idx] =
                             fragment.collectedLabeledPoints[idx].copy(codeId = lineCodeForRevert)
                     }
-                }
-
-                if (lineForRevert != null) {
-                    lineForRevert.codeId = lineCodeForRevert
-                    lineForRevert.featureCode =
-                        originalEditLineFeatureCode
-                            ?: lineCodeForRevert.filter { it.isLetter() }.ifEmpty { "L" }
-                    updateLineGeometry(lineForRevert, originalPoints)
                 }
             }
             originalEditLineState = null // Clear state since session ended
@@ -6579,26 +5580,27 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         editLineLayoutListener = null
         animateSheetTransition(root, null, transition) {
             if (!fragment.isSelectingPointForEditLine) {
-                val originalLine = fragment.pendingEditLineSegment
-                if (!isEditLineSaved && originalLine != null) {
-                    originalLine.unhighlight()
-                    if (!fragment.binding.mapView.overlays.contains(originalLine)) {
-                        addPolylineBelowMarkers(originalLine)
-                    }
+                val map = fragment.mapLibreMap
+                
+                // Cleanup preview overlays
+                fragment.highlightedLineOverlay?.let { layerId ->
+                    map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
                 }
-                fragment.pendingEditLineSegment = null
-
-                fragment.highlightedLineOverlay?.let { fragment.binding.mapView.overlays.remove(it) }
                 fragment.highlightedLineOverlay = null
-                fragment.closingSegmentOverlay?.let { fragment.binding.mapView.overlays.remove(it) }
+                
+                fragment.closingSegmentOverlay?.let { layerId ->
+                    map?.let { m -> MapLibrePolylineHelper.removePolyline(m, layerId as String) }
+                }
                 fragment.closingSegmentOverlay = null
+                
+                fragment.pendingEditLineSegment = null
+                reconstructPolylines() // Show the original line again
             }
             fragment.currentEditLineAdapter = null
             fragment.currentEditLineBinding = null
             fragment.selectedPoint = null
             isEditLineSaved = false
             updateMarkersForZoom(forceRefresh = true)
-            fragment.binding.mapView.invalidate()
             if (fragment.binding.bottomSheetCollectPoint.root.visibility == View.GONE && fragment.currentLineCodeId != null && fragment.selectedPointIndicatorType == IndicatorType.LINE) {
                 showCollectPointBottomSheet()
             } else if (showNav) {
@@ -6610,10 +5612,11 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
     }
 
     fun showNewPointBottomSheet(
-        lineSegment: ClickablePolylineOverlay?,
+        layerId: String? = null,
         transition: BottomSheetTransition = BottomSheetTransition.SLIDE_UP,
         animate: Boolean = true
     ) = hideMenu {
+        val lineSegment = layerId?.let { lid -> collectedLines.find { it.line.id == lid } }
         val sheetBinding = fragment.binding.bottomSheetNewPoint
         hideBottomNavigation {
             // Ensure New Point sheet is above any other visible sheet
@@ -6629,17 +5632,22 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             val nextId =
                 if (fragment.pointIdPrefix != null) "${fragment.pointIdPrefix}${fragment.pointIdNumericCounter}" else fragment.pointCounter.toString()
             sheetBinding.etPointId.setText(nextId); sheetBinding.etPointId.hint = nextId
-            val defCode =
-                lineSegment?.codeId?.ifEmpty { "P" } ?: fragment.selectedPointCodeId.ifEmpty { "P" }
+            
+            var defCode = fragment.selectedPointCodeId.ifEmpty { "P" }
+            layerId?.let { lid ->
+                collectedLines.find { it.line.id == lid }?.let {
+                    defCode = it.line.id // Or however we get the code from the line
+                }
+            }
+            
             sheetBinding.tvPointType.text = defCode
             updatePointTypeIndicator(
                 sheetBinding.viewTypeDot,
                 if (isLineCodeFromCodeId(defCode)) IndicatorType.LINE else IndicatorType.POINT
             )
-            (fragment.currentLocation ?: fragment.locationMarker?.position)?.let {
-                sheetBinding.etLongitude.setText(it.longitude.toString()); sheetBinding.etLatitude.setText(
-                it.latitude.toString()
-            )
+            fragment.currentLocation?.let {
+                sheetBinding.etLongitude.setText(it.longitude.toString())
+                sheetBinding.etLatitude.setText(it.latitude.toString())
             }
 
             sheetBinding.llPointTypeSelector.setOnClickListener {
@@ -6663,7 +5671,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                     )
                         .show(); return@setOnClickListener
                 }
-                val geo = GeoPoint(lat, lon)
+                val geo = LatLng(lat, lon)
                 val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("UTC")
                 }.format(Date())
@@ -6707,8 +5715,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             })
 
             // Disable map touch and hide map buttons when new point sheet is open
-            fragment.binding.mapView.setMultiTouchControls(false)
-            fragment.binding.mapView.setOnTouchListener { _, _ -> true }
+            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(false)
             fragment.binding.llMapsButtons.visibility = View.GONE
 
             if (animate) {
@@ -6724,8 +5731,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         onHidden: (() -> Unit)? = null
     ) {
         // Re-enable map touch and show map buttons
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.setOnTouchListener(null)
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
         val root = fragment.binding.bottomSheetNewPoint.root
@@ -6762,11 +5768,12 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         adapter?.updateItems(filtered)
     }
 
-    private fun addExistingPointToLineSegment(newPt: LabeledPoint, ls: ClickablePolylineOverlay) {
+    private fun addExistingPointToLineSegment(newPt: LabeledPoint, lineWithPoints: com.nexova.survedge.data.db.entity.LineWithPoints) {
         fragment.isSelectingPointForEditLine = false
+        val lineId = lineWithPoints.line.id
 
         // Check 0: Prevent duplicate point in current line
-        if (ls.labeledPoints.any { it.id == newPt.id }) {
+        if (lineWithPoints.points.any { it.id == newPt.id }) {
             Toast.makeText(
                 fragment.requireContext(),
                 "Point is already in this line",
@@ -6775,18 +5782,12 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             return
         }
 
-        // Prevent adding points that are already part of an existing line (that is NOT this line)
-        // Check 1: Visual Overlays
-        val isVisuallyConnected = fragment.completedLineOverlays.any { overlay ->
-            (overlay is ClickablePolylineOverlay) && overlay != ls && overlay.labeledPoints.any { it.id == newPt.id }
-        }
-
-        // Check 2: Database State
+        // Check 1: Database State (Check if point is already part of another line)
         val isDbConnected = collectedLines.any { line ->
-            line.line.id != ls.codeId && line.points.any { it.id == newPt.id }
+            line.line.id != lineId && line.points.any { it.id == newPt.id }
         }
 
-        if (isVisuallyConnected || isDbConnected) {
+        if (isDbConnected) {
             Toast.makeText(
                 fragment.requireContext(),
                 "Point is already part of another line",
@@ -6795,20 +5796,24 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             return
         }
 
-        val corrected = if (newPt.codeId != ls.codeId) newPt.copy(codeId = ls.codeId) else newPt
-        val updated = ls.labeledPoints.toMutableList(); updated.add(corrected)
+        val corrected = if (newPt.codeId != lineId) newPt.copy(codeId = lineId) else newPt
+        
+        // Update database: Save the point with its new code
+        val projectId = viewModel.currentProjectId.value ?: 1L
+        viewModel.savePoint(corrected.toPointEntity(projectId))
 
-        updateLineGeometry(ls, updated)
-
+        // Note: UI update is handled by the database observer triggering reconstructPolylines
+        
+        // Update local cache and UI sheet
         val idx = fragment.collectedLabeledPoints.indexOfFirst { it.id == newPt.id }
         if (idx >= 0) fragment.collectedLabeledPoints[idx] = corrected
-        fragment.currentEditLineAdapter?.updatePoints(updated)
-        // updateMarkersForZoom() and invalidate() are handled in updateLineGeometry
-        fragment.currentEditLineBinding?.let {
-            it.tvPointsCount.text =
-                "${updated.size} ${if (updated.size == 1) "Point" else "Points"}"
+        
+        val updatedPoints = lineWithPoints.points.toMutableList().apply { 
+            // We need to convert corrected (LabeledPoint) to PointEntity or just let the observer refresh
         }
-        showEditLineBottomSheet(ls) // Ensure sheet is visible
+        
+        // Refresh the sheet
+        showEditLineBottomSheet(lineWithPoints) 
     }
 
     private fun updatePointIdAfterSave(pid: String) {
@@ -7010,7 +6015,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
         fragment.helper.hideStakeoutUI()
 
-        fragment.binding.mapView.invalidate()
+        updateMarkersForZoom()
     }
 
     fun updateStakeoutMeasurements(lat: Double, lon: Double, alt: Double) {
@@ -7018,9 +6023,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         val currentTarget = session.targetPoints.getOrNull(session.currentIndex) ?: return
 
         // Calculate measurements
-        val currentGeo = GeoPoint(lat, lon, alt)
+        val currentGeo = LatLng(lat, lon, alt)
         val targetGeo =
-            GeoPoint(currentTarget.latitude, currentTarget.longitude, currentTarget.elevation)
+            LatLng(currentTarget.latitude, currentTarget.longitude, currentTarget.elevation)
 
         // Use CoordinateUtils
         val dist = CoordinateUtils.calculateDistance(
@@ -7085,6 +6090,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         if (fragment.isInBullseyeMode) {
             // Restore bullseye view if it was hidden (e.g. after closing info sheet)
             if (fragment.bullseyeOverlay == null) {
+                fragment.bullseyeOverlay = fragment.binding.bullseyeView
                 fragment.helper.showBullseyeView()
             }
             // Scale for precision view: e.g., 1000 pixels per meter (Zoomed out to fit 0.5m range)
@@ -7096,7 +6102,6 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             )
             fragment.bullseyeOverlay?.verticalDistance = measurement.verticalDistance
             fragment.bullseyeOverlay?.isInTolerance = measurement.inTolerance
-            fragment.binding.mapView.invalidate()
         }
 
     }
@@ -7203,8 +6208,8 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
             b.txtLocal.text = "Global"
 
             // Show Lat/Lon in Decimal Degrees
-            b.txtLatLongE.text = String.format("%.8f", point.geoPoint.latitude)
-            b.txtLatLongN.text = String.format("%.8f", point.geoPoint.longitude)
+            b.txtLatLongE.text = String.format("%.8f", point.latLng.latitude)
+            b.txtLatLongN.text = String.format("%.8f", point.latLng.longitude)
             b.txtLatLongU.text = String.format("%.3f m", point.elevation)
 
         } else {
@@ -7213,9 +6218,9 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
 
             // Ideally this would be a projection conversion
             b.txtLatLongE.text =
-                String.format("%.2f m E", point.geoPoint.longitude * 111320.0) // Mock conversion
+                String.format("%.2f m E", point.latLng.longitude * 111320.0) // Mock conversion
             b.txtLatLongN.text =
-                String.format("%.2f m N", point.geoPoint.latitude * 110574.0)  // Mock conversion
+                String.format("%.2f m N", point.latLng.latitude * 110574.0)  // Mock conversion
             b.txtLatLongU.text = String.format("%.2f m", point.elevation)
         }
     }
@@ -7348,9 +6353,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             wasOpened = true
 
                             // Disable map touch when keyboard is open
-                            fragment.binding.mapView.setMultiTouchControls(false)
-                            fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>().forEach { it.isEnabled = false }
-                            fragment.binding.mapView.setOnTouchListener { _, _ -> true }
+                            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(false)
                             // Hide map buttons when keyboard is open
                             fragment.binding.llMapsButtons.visibility = View.GONE
                         }
@@ -7371,9 +6374,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                             wasOpened = false
 
                             // Re-enable map touch when keyboard is closed
-                            fragment.binding.mapView.setMultiTouchControls(true)
-                            fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>().forEach { it.isEnabled = true }
-                            fragment.binding.mapView.setOnTouchListener(null)
+                            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
                             // Show map buttons when keyboard is closed
                             fragment.binding.llMapsButtons.visibility = View.VISIBLE
                         }
@@ -7394,10 +6395,7 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         animateSheetTransition(root, null, transition) {
             onHidden?.invoke()
             // Re-enable map touch and show map buttons
-            fragment.binding.mapView.setMultiTouchControls(true)
-            fragment.binding.mapView.overlays.filterIsInstance<org.osmdroid.views.overlay.gestures.RotationGestureOverlay>()
-                .forEach { it.isEnabled = true }
-            fragment.binding.mapView.setOnTouchListener(null)
+            fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
             fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
             adjustMapsButtonsForBottomSheet(closingView = root)
@@ -7405,7 +6403,6 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
                 fragment.selectedPoint = null
             }
             updateMarkersForZoom(forceRefresh = true)
-            fragment.binding.mapView.invalidate()
             restoreStateAfterClosingInfoSheet()
         }
     }
@@ -7417,4 +6414,11 @@ fun setupSwipeGestureForPointLineSelection(v: View, b: BottomSheetLineSegmentBin
         imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
+    private fun PointEntity.toLabeledPoint() = LabeledPoint(
+        id = id,
+        codeId = code,
+        coords = listOf(longitude, latitude),
+        elevation = elevation,
+        ts = ts
+    )
 }

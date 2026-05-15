@@ -1,6 +1,7 @@
 package com.nexova.survedge.ui.mapping.fragment
 
 import android.graphics.Color
+import android.graphics.RectF
 import android.hardware.SensorManager
 import android.view.View
 import android.view.ViewGroup
@@ -8,88 +9,109 @@ import android.view.ViewTreeObserver
 import androidx.core.content.ContextCompat
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import com.nexova.survedge.R
-import com.nexova.survedge.ui.mapping.maplibre.OsmdroidPolylineHelper
-import com.nexova.survedge.ui.mapping.overlay.BullseyeOverlay
-import com.nexova.survedge.ui.mapping.overlay.DashedPolylineOverlay
-import com.nexova.survedge.ui.mapping.overlay.RotationGestureOverlay
-import com.nexova.survedge.ui.stakeout.model.StakeoutMeasurement
-import org.osmdroid.events.MapListener
-import org.osmdroid.events.ScrollEvent
-import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.RasterLayer
+import org.maplibre.android.style.sources.RasterSource
+import org.maplibre.android.style.sources.TileSet
+import com.nexova.survedge.ui.mapping.maplibre.MapLibrePolylineHelper
+import com.nexova.survedge.ui.mapping.maplibre.MapLibreMarkerHelper
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.Point
+import org.maplibre.geojson.LineString
+import com.nexova.survedge.ui.stakeout.model.*
+import com.nexova.survedge.ui.stakeout.util.*
+import com.nexova.survedge.data.db.entity.LineWithPoints
+import android.widget.TextView
 
 class MappingFragmentHelper(private val fragment: MappingFragment) {
 
     fun initializeMap() {
-        fragment.binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.minZoomLevel = 2.0
-        fragment.binding.mapView.maxZoomLevel = 25.0
-        fragment.binding.mapView.isHorizontalMapRepetitionEnabled = true
-        fragment.binding.mapView.isVerticalMapRepetitionEnabled = false
-        fragment.binding.mapView.isTilesScaledToDpi = true
-        fragment.binding.mapView.setBuiltInZoomControls(false)
-        fragment.binding.mapView.setUseDataConnection(true)
+        fragment.binding.mapView.getMapAsync { mapLibreMap ->
+            fragment.mapLibreMap = mapLibreMap
+            
+            // Set style using OpenStreetMap raster tiles
+            val osmTileSet = TileSet("2.1.0", "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+            osmTileSet.minZoom = 0f
+            osmTileSet.maxZoom = 19f
+            
+            val styleBuilder = Style.Builder()
+                .withSource(RasterSource("osm-source", osmTileSet, 256))
+                .withLayer(RasterLayer("osm-layer", "osm-source"))
 
-        fragment.binding.mapView.setScrollableAreaLimitDouble(
-            BoundingBox(85.0, 180.0, -85.0, -180.0)
-        )
-
-        fragment.binding.mapView.addMapListener(object : MapListener {
-            override fun onScroll(event: ScrollEvent?): Boolean {
-                fragment.isMapFitted = false
-                fragment.logic.updateCompassRotation()
-                return false
-            }
-
-            override fun onZoom(event: ZoomEvent?): Boolean {
-                fragment.isMapFitted = false
-                event?.let {
-                    val currentZoom = it.zoomLevel
-                    val maxZoom = fragment.binding.mapView.maxZoomLevel
-                    val isNearMaxZoom = currentZoom >= maxZoom - 0.1
-                    val zoomChanged = kotlin.math.abs(currentZoom - fragment.lastZoomLevel) > 0.5
-
-                    if ((zoomChanged || isNearMaxZoom) && fragment.collectedLabeledPoints.isNotEmpty()) {
+            mapLibreMap.setStyle(styleBuilder) { style ->
+                // Basic setup
+                mapLibreMap.uiSettings.isCompassEnabled = false
+                mapLibreMap.uiSettings.isLogoEnabled = false
+                mapLibreMap.uiSettings.isAttributionEnabled = false
+                
+                mapLibreMap.addOnCameraIdleListener {
+                    fragment.isMapFitted = false
+                    fragment.logic.updateCompassRotation()
+                    
+                    val currentZoom = mapLibreMap.cameraPosition.zoom
+                    if (kotlin.math.abs(currentZoom - fragment.lastZoomLevel) > 0.5 && fragment.collectedLabeledPoints.isNotEmpty()) {
                         fragment.lastZoomLevel = currentZoom
-                        fragment.binding.mapView.post { fragment.logic.updateMarkersForZoom() }
+                        fragment.logic.updateMarkersForZoom()
                     }
                 }
-                fragment.logic.updateCompassRotation()
-                return false
+
+                mapLibreMap.addOnCameraMoveListener {
+                    fragment.logic.updateCompassRotation()
+                }
+
+                mapLibreMap.addOnMapClickListener { latLng ->
+                    val point = mapLibreMap.projection.toScreenLocation(latLng)
+                    val rect = RectF(point.x - 20f, point.y - 20f, point.x + 20f, point.y + 20f)
+                    val features = mapLibreMap.queryRenderedFeatures(rect)
+                    
+                    // 1. Detect point clicks (check geometry type and id property)
+                    val clickedPoint = features.find { it.geometry() is Point && it.getStringProperty("id") != null }
+                    if (clickedPoint != null) {
+                        val pointId = clickedPoint.getStringProperty("id")
+                        fragment.collectedLabeledPoints.find { it.id == pointId }?.let {
+                            fragment.logic.handlePointClick(it)
+                        }
+                        true
+                    } else {
+                        // 2. Detect polyline clicks (check geometry type and id property)
+                        val clickedLine = features.find { it.geometry() is LineString && it.getStringProperty("id") != null }
+                        if (clickedLine != null) {
+                            val lineId = clickedLine.getStringProperty("id")
+                            fragment.logic.handleLineSegmentClick("layer_line_" + lineId)
+                            true
+                        } else {
+                            // If we didn't click anything relevant
+                            fragment.logic.hideLineSegmentDetailsBottomSheet()
+                            fragment.logic.hidePointDetailsBottomSheet()
+                            false
+                        }
+                    }
+                }
+
+                fragment.lastZoomLevel = 15.0
+                mapLibreMap.moveCamera(CameraUpdateFactory.zoomTo(15.0))
+                
+                fragment.logic.createLocationPin()
+                
+                // Trigger database observe after map is ready
+                // Actually, they are already observed in Fragment, but we might need to refresh
+                fragment.logic.refreshMapData()
             }
-        })
-
-        fragment.mapController = fragment.binding.mapView.controller
-        fragment.mapController?.setZoom(15.0)
-        fragment.lastZoomLevel = 15.0
-
-        fragment.rotationGestureOverlay = RotationGestureOverlay(fragment.binding.mapView)
-        fragment.binding.mapView.overlays.add(0, fragment.rotationGestureOverlay)
-
-        fragment.logic.createLocationPin()
+        }
     }
 
     fun setupZoomControls() {
         fragment.binding.imgZoomIn.setOnClickListener {
-            val currentZoom = fragment.binding.mapView.zoomLevelDouble
-            if (currentZoom < fragment.binding.mapView.maxZoomLevel) {
-                fragment.logic.animateZoom(
-                    currentZoom,
-                    kotlin.math.min(currentZoom + 1.0, fragment.binding.mapView.maxZoomLevel)
-                )
-            }
+            val currentZoom = fragment.mapLibreMap?.cameraPosition?.zoom ?: return@setOnClickListener
+            fragment.mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom + 1.0))
         }
         fragment.binding.imgZoomOut.setOnClickListener {
-            val currentZoom = fragment.binding.mapView.zoomLevelDouble
-            if (currentZoom > fragment.binding.mapView.minZoomLevel) {
-                fragment.logic.animateZoom(
-                    currentZoom,
-                    kotlin.math.max(currentZoom - 1.0, fragment.binding.mapView.minZoomLevel)
-                )
-            }
+            val currentZoom = fragment.mapLibreMap?.cameraPosition?.zoom ?: return@setOnClickListener
+            fragment.mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom - 1.0))
         }
     }
 
@@ -178,28 +200,27 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
     private fun drawInitialConnectionLine() {
         val session = fragment.stakeoutSession ?: return
         val currentTarget = session.targetPoints.getOrNull(session.currentIndex) ?: return
-        val targetGeo = GeoPoint(currentTarget.latitude, currentTarget.longitude, currentTarget.elevation)
+        val targetGeo = LatLng(currentTarget.latitude, currentTarget.longitude, currentTarget.elevation)
         
         // Get current location from various sources
-        val currentGeo = fragment.currentLocation 
-            ?: fragment.locationMarker?.position
+        val currentGeo = fragment.currentLocation
         
         if (currentGeo != null) {
             // Draw connection line immediately
             updateConnectionLine(currentGeo, targetGeo)
             
             // Calculate distance for proximity circle
-            val dist = currentGeo.distanceToAsDouble(targetGeo)
+            val dist = currentGeo.distanceTo(targetGeo)
             updateProximityCircle(targetGeo, dist < 10.0)
         } else {
             // No location available yet, try to get last known location
             try {
                 fragment.fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
                     if (location != null) {
-                        val geoPoint = GeoPoint(location.latitude, location.longitude, location.altitude)
+                        val geoPoint = LatLng(location.latitude, location.longitude, location.altitude)
                         fragment.currentLocation = geoPoint
                         updateConnectionLine(geoPoint, targetGeo)
-                        val dist = geoPoint.distanceToAsDouble(targetGeo)
+                        val dist = geoPoint.distanceTo(targetGeo)
                         updateProximityCircle(targetGeo, dist < 10.0)
                     }
                 }
@@ -220,10 +241,13 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
             val restoreLine = fragment.restoreLineSegmentAfterStakeout
             fragment.restoreLineSegmentAfterStakeout = null
             if (restoreLine != null) {
-                fragment.logic.showLineSegmentDetailsBottomSheet(
-                    restoreLine,
-                    MappingFragmentLogic.BottomSheetTransition.SLIDE_UP
-                )
+                val lineWithPoints = fragment.viewModel.currentLines.value.find { it.line.id == restoreLine }
+                if (lineWithPoints != null) {
+                    fragment.logic.showLineSegmentDetailsBottomSheet(
+                        lineWithPoints,
+                        MappingFragmentLogic.BottomSheetTransition.SLIDE_UP
+                    )
+                }
             } else if (showNav) {
                 fragment.logic.restoreStateAfterClosingInfoSheet()
             } else {
@@ -351,85 +375,50 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         }
     }
 
-    fun updateConnectionLine(start: GeoPoint, end: GeoPoint) {
-        if (fragment.connectionLineOverlay == null) {
-            fragment.connectionLineOverlay = OsmdroidPolylineHelper.createPolyline(
-                fragment.binding.mapView,
-                listOf(start, end),
-                ContextCompat.getColor(fragment.requireContext(), R.color.stakeout_connection_line),
-                6f,
-                closed = false,
-                dashed = true
-            )
-        } else {
-            val overlay = fragment.connectionLineOverlay
-            if (overlay is org.osmdroid.views.overlay.Polyline) {
-                overlay.setPoints(listOf(start, end))
-            } else if (overlay is DashedPolylineOverlay) {
-                overlay.setPoints(listOf(start, end))
-            }
-        }
-        fragment.binding.mapView.invalidate()
+    fun updateConnectionLine(start: LatLng, end: LatLng) {
+        val map = fragment.mapLibreMap ?: return
+        fragment.connectionLineOverlay = MapLibrePolylineHelper.createPolyline(
+            map,
+            "connection_line",
+            listOf(start, end),
+            ContextCompat.getColor(fragment.requireContext(), R.color.stakeout_connection_line),
+            6f,
+            closed = false,
+            dashed = true
+        )
     }
 
-    fun updateProximityCircle(target: GeoPoint, show: Boolean) {
-        val mapView = fragment.binding.mapView
+    fun updateProximityCircle(target: LatLng, show: Boolean) {
+        val map = fragment.mapLibreMap ?: return
         if (!show) {
-            fragment.stakeoutProximityCircles.forEach {
-                if (it is org.osmdroid.views.overlay.Polygon) {
-                    mapView.overlays.remove(it)
-                }
-            }
-            fragment.stakeoutProximityCircles.clear()
-            mapView.invalidate()
+            MapLibrePolylineHelper.removePolyline(map, "proximity_circle")
             return
         }
 
-        val radiuses = listOf(0.4) // Only 0.4m ring
-
-        if (fragment.stakeoutProximityCircles.isEmpty()) {
-            radiuses.forEach { radius ->
-                val circle = org.osmdroid.views.overlay.Polygon(mapView)
-                circle.points = org.osmdroid.views.overlay.Polygon.pointsAsCircle(target, radius)
-                circle.fillPaint.color = ContextCompat.getColor(fragment.requireContext(), R.color.gray_overlay_50) // 50% transparency grey
-                circle.outlinePaint.color = Color.TRANSPARENT // No outline
-                fragment.stakeoutProximityCircles.add(circle)
-                mapView.overlays.add(0, circle)
-            }
-        } else {
-            // Clean up if we had more rings before
-            if (fragment.stakeoutProximityCircles.size > radiuses.size) {
-                for (i in fragment.stakeoutProximityCircles.size - 1 downTo radiuses.size) {
-                    val overlay = fragment.stakeoutProximityCircles.removeAt(i)
-                    if (overlay is org.osmdroid.views.overlay.Polygon) {
-                        mapView.overlays.remove(overlay)
-                    }
-                }
-            }
-
-            fragment.stakeoutProximityCircles.filterIsInstance<org.osmdroid.views.overlay.Polygon>()
-                .forEachIndexed { index, circle ->
-                    radiuses.getOrNull(index)?.let { radius ->
-                        circle.points =
-                            org.osmdroid.views.overlay.Polygon.pointsAsCircle(target, radius)
-                    }
-                }
+        // Generate circle points
+        val points = mutableListOf<LatLng>()
+        val radius = 0.4 / 111319.9 // approx conversion to degrees at equator, simple for now
+        for (i in 0..360 step 10) {
+            val angle = Math.toRadians(i.toDouble())
+            points.add(LatLng(target.latitude + radius * kotlin.math.cos(angle), target.longitude + radius * kotlin.math.sin(angle)))
         }
-        mapView.invalidate()
+
+        MapLibrePolylineHelper.createPolyline(
+            map,
+            "proximity_circle",
+            points,
+            ContextCompat.getColor(fragment.requireContext(), R.color.gray_overlay_50),
+            2f,
+            closed = true
+        )
     }
 
 
     fun clearStakeoutMarkers() {
-        fragment.connectionLineOverlay?.let {
-            OsmdroidPolylineHelper.removePolyline(fragment.binding.mapView, it)
-        }
+        val map = fragment.mapLibreMap ?: return
+        MapLibrePolylineHelper.removePolyline(map, "connection_line")
+        MapLibrePolylineHelper.removePolyline(map, "proximity_circle")
         fragment.connectionLineOverlay = null
-
-        fragment.stakeoutProximityCircles.forEach {
-            if (it is org.osmdroid.views.overlay.Polygon) {
-                fragment.binding.mapView.overlays.remove(it)
-            }
-        }
         fragment.stakeoutProximityCircles.clear()
     }
 
@@ -437,43 +426,36 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
     private var hiddenOverlayIndices = mutableListOf<Int>()
 
     fun showBullseyeView() {
-        if (fragment.bullseyeOverlay == null) {
-            fragment.bullseyeOverlay = BullseyeOverlay(fragment.requireContext())
-            fragment.binding.mapView.overlays.add(fragment.bullseyeOverlay)
-        }
+        val bullseyeView = fragment.binding.bullseyeView
+        bullseyeView.visibility = View.VISIBLE
 
         // Center on the TARGET point
         val target = fragment.stakeoutSession?.let { it.targetPoints.getOrNull(it.currentIndex) }
-        val currentZoom = fragment.binding.mapView.zoomLevelDouble
+        val currentZoom = fragment.mapLibreMap?.cameraPosition?.zoom ?: 15.0
         val targetZoom = if (currentZoom > 22.0) currentZoom else 22.0
 
         if (target != null) {
-            val geo = GeoPoint(target.latitude, target.longitude, target.elevation)
-            fragment.mapController?.setCenter(geo)
+            val geo = LatLng(target.latitude, target.longitude, target.elevation)
+            fragment.mapLibreMap?.moveCamera(CameraUpdateFactory.newLatLng(geo))
 
-            if (fragment.binding.mapView.zoomLevelDouble < 20.0) {
-                fragment.mapController?.setZoom(22.0)
+            if ((fragment.mapLibreMap?.cameraPosition?.zoom ?: 0.0) < 20.0) {
+                fragment.mapLibreMap?.moveCamera(CameraUpdateFactory.zoomTo(22.0))
             }
         }
 
         fragment.isLockMode = true // Lock the map in bullseye
 
         // Lock Map Orientation to North Up (0) to prevent rotation confusion
-        savedMapOrientation = fragment.binding.mapView.mapOrientation
-        fragment.binding.mapView.mapOrientation = 0f
+        // Lock Map Orientation to North Up (0)
+        savedMapOrientation = fragment.mapLibreMap?.cameraPosition?.bearing?.toFloat() ?: 0f
+        fragment.mapLibreMap?.animateCamera(CameraUpdateFactory.bearingTo(0.0))
 
-        // Hide ALL other overlays to prevent clutter (markers, lines, etc.)
-        hiddenOverlayIndices.clear()
-        fragment.binding.mapView.overlays.forEachIndexed { index, overlay ->
-            if (overlay != fragment.bullseyeOverlay && overlay.isEnabled) {
-                overlay.isEnabled = false
-                hiddenOverlayIndices.add(index)
+        // In MapLibre, we hide layers
+        fragment.mapLibreMap?.style?.let { style ->
+            style.layers.forEach { layer ->
+                layer.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(org.maplibre.android.style.layers.Property.NONE))
             }
         }
-
-        // Explicitly default collected points to hidden (safety net)
-        fragment.collectedPointMarkers.forEach { it.isEnabled = false }
-        fragment.logic.updateMarkersForZoom() // Will act as a "Clear" or "Don't Draw" due to Logic patch
 
         // Hide map buttons
         fragment.binding.llMapsButtons.visibility = View.GONE
@@ -488,44 +470,29 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         fragment.isAnimatingLocation = false // Important to reset this flag
 
         // Disable Rotation Gesture
-        fragment.rotationGestureOverlay?.isEnabled = false
+        fragment.mapLibreMap?.uiSettings?.isRotateGesturesEnabled = false
 
         // Disable manual map interaction while in precision mode
-        fragment.binding.mapView.setMultiTouchControls(false)
-        fragment.binding.mapView.invalidate()
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(false)
     }
 
     fun hideBullseyeView() {
-        fragment.bullseyeOverlay?.let {
-            fragment.binding.mapView.overlays.remove(it)
-            fragment.bullseyeOverlay = null
-        }
+        fragment.binding.bullseyeView.visibility = View.GONE
         fragment.isLockMode = false // Unlock the map
 
-        // Restore Map Orientation ONLY if we were in Bullseye mode (which locks it)
+        // Restore Map Orientation
         if (fragment.isInBullseyeMode) {
-            fragment.binding.mapView.mapOrientation = savedMapOrientation
+            fragment.mapLibreMap?.animateCamera(CameraUpdateFactory.bearingTo(savedMapOrientation.toDouble()))
         }
 
         // Restore map buttons
         fragment.binding.llMapsButtons.visibility = View.VISIBLE
 
-        // Restore visibility of previously hidden overlays
-        hiddenOverlayIndices.forEach { index ->
-            if (index < fragment.binding.mapView.overlays.size) {
-                fragment.binding.mapView.overlays[index].isEnabled = true
+        // Restore visibility of layers
+        fragment.mapLibreMap?.style?.let { style ->
+            style.layers.forEach { layer ->
+                layer.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(org.maplibre.android.style.layers.Property.VISIBLE))
             }
-        }
-        hiddenOverlayIndices.clear()
-
-        // Explicitly enable standard markers if they were missed logic (safety net)
-        fragment.locationMarker?.isEnabled = true
-        fragment.connectionLineOverlay?.let {
-            if (it is org.osmdroid.views.overlay.Polyline) it.isEnabled = true
-            else if (it is DashedPolylineOverlay) it.isEnabled = true
-        }
-        fragment.stakeoutProximityCircles.forEach {
-            if (it is org.osmdroid.views.overlay.Polygon) it.isEnabled = true
         }
 
         // Restore Sensor Logic (Compass)
@@ -540,10 +507,9 @@ class MappingFragmentHelper(private val fragment: MappingFragment) {
         }
 
         // re-enable rotation gesture
-        fragment.rotationGestureOverlay?.isEnabled = true
+        fragment.mapLibreMap?.uiSettings?.isRotateGesturesEnabled = true
 
         // Re-enable manual map interaction
-        fragment.binding.mapView.setMultiTouchControls(true)
-        fragment.binding.mapView.invalidate()
+        fragment.mapLibreMap?.uiSettings?.setAllGesturesEnabled(true)
     }
 }

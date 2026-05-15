@@ -60,8 +60,7 @@ dependencies {
     implementation(libs.sdp.android)
     implementation(libs.ssp.android)
 
-// osmdroid for OpenStreetMap
-    implementation(libs.osmdroid.android)
+    implementation(libs.maplibre.android)
 
     // Google Play Services Location for real-time location tracking
     implementation(libs.play.services.location)

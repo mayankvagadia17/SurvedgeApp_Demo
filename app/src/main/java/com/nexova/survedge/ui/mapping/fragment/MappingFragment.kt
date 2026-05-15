@@ -17,18 +17,16 @@ import com.nexova.survedge.databinding.BottomSheetEditLineBinding
 import com.nexova.survedge.databinding.FragmentMappingBinding
 import com.nexova.survedge.ui.mapping.adapter.EditPointAdapter
 import com.nexova.survedge.ui.mapping.adapter.IndicatorType
-import com.nexova.survedge.ui.mapping.overlay.ClickablePolylineOverlay
-import com.nexova.survedge.ui.mapping.overlay.DoubleTapInterceptorOverlay
 import com.nexova.survedge.ui.mapping.overlay.LabeledPoint
-import com.nexova.survedge.ui.mapping.overlay.PointClickHandlerOverlay
-import com.nexova.survedge.ui.mapping.overlay.RotationGestureOverlay
-import org.osmdroid.api.IMapController
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.overlay.Marker
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.OnMapReadyCallback
+import org.maplibre.android.maps.Style
 import java.util.LinkedList
 import android.os.Handler
 import com.nexova.survedge.ui.stakeout.model.*
-import com.nexova.survedge.ui.mapping.overlay.BullseyeOverlay
+import com.nexova.survedge.ui.mapping.overlay.BullseyeView
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.nexova.survedge.ui.mapping.viewmodel.MappingViewModel
@@ -41,8 +39,7 @@ class MappingFragment : Fragment() {
     val viewModel: MappingViewModel by viewModels() 
     lateinit var logic: MappingFragmentLogic
     val helper = MappingFragmentHelper(this)
-    internal var mapController: IMapController? = null
-    internal var locationMarker: Marker? = null
+    internal var mapLibreMap: MapLibreMap? = null
     internal var fusedLocationClient: FusedLocationProviderClient? = null
     internal var locationCallback: LocationCallback? = null
     internal var isFirstLocationUpdate = true
@@ -50,17 +47,13 @@ class MappingFragment : Fragment() {
     internal var orientationSensor: Sensor? = null
     internal var sensorEventListener: SensorEventListener? = null
     internal var currentHeading: Float = 0f
-    internal var currentLocation: GeoPoint? = null
+    internal var lastLocation: android.location.Location? = null
+    internal var currentLocation: LatLng? = null
     internal var isLockMode: Boolean = false
     internal var locationRequest: com.google.android.gms.location.LocationRequest? = null
-    internal var rotationGestureOverlay: RotationGestureOverlay? = null
-    internal var doubleTapInterceptorOverlay: DoubleTapInterceptorOverlay? = null
-    internal var pointClickHandlerOverlay: PointClickHandlerOverlay? = null
-    internal val collectedPointMarkers = mutableListOf<Marker>()
-    internal val markerToPointMap = mutableMapOf<Marker, LabeledPoint>()
-    internal var polylineOverlay: Any? = null
-    internal var liveTrackingLineOverlay: Any? = null
     internal var pointCounter = 1
+    internal var polylineOverlay: String? = null
+    internal var liveTrackingLineOverlay: String? = null
     internal var pointIdPrefix: String? = null
     internal var pointIdNumericCounter = 1
     internal var collectedLabeledPoints = LinkedList<LabeledPoint>()
@@ -72,13 +65,13 @@ class MappingFragment : Fragment() {
     internal var addFromBeginning: Boolean = false
     internal var hasStartedNewLine: Boolean = false
     internal var wasCollectingBeforePointDetails: Boolean = false
-    internal val completedLineOverlays = mutableListOf<Any>()
+    internal val completedLineOverlays = mutableListOf<String>()
     internal var currentLineCodeId: String? = null
-    internal var highlightedLineOverlay: ClickablePolylineOverlay? = null
-    internal var closingSegmentOverlay: ClickablePolylineOverlay? = null
+    internal var highlightedLineOverlay: String? = null
+    internal var closingSegmentOverlay: String? = null
     internal var isSelectingPointForEditLine: Boolean = false
-    internal var pendingEditLineSegment: ClickablePolylineOverlay? = null
-    internal var restoreLineSegmentAfterStakeout: ClickablePolylineOverlay? = null
+    internal var pendingEditLineSegment: String? = null
+    internal var restoreLineSegmentAfterStakeout: String? = null
     internal val lineCodeSequenceCounters = mutableMapOf<String, Int>()
     internal var currentEditLineAdapter: EditPointAdapter? = null
     internal var currentEditLineBinding: BottomSheetEditLineBinding? = null
@@ -87,14 +80,14 @@ class MappingFragment : Fragment() {
     internal var selectedPoint: LabeledPoint? = null
     internal var isCreatingNewLine: Boolean = false
     internal val newLinePoints = LinkedList<LabeledPoint>()
-    internal var newLineOverlay: Any? = null
+    internal var newLineOverlay: String? = null
     internal var newLineCodeId: String = "L1"
     internal var isNewLineClosed: Boolean = false
     internal var isNewLineSaved: Boolean = false
     internal var currentPinText: String = "M"
     internal val labelOverlapDistanceX = 35
     internal val labelOverlapDistanceY = 25
-    internal var targetLocation: GeoPoint? = null
+    internal var targetLocation: LatLng? = null
     internal var isAnimatingLocation = false
     internal var currentMapAnimator: ValueAnimator? = null
     internal var isMapFitted = false
@@ -112,9 +105,9 @@ class MappingFragment : Fragment() {
     internal var stakeoutSession: StakeoutSession? = null
     internal var currentStakeoutMode: StakeoutMode = StakeoutMode.NONE
     internal var currentMeasurement: StakeoutMeasurement? = null
-    internal var connectionLineOverlay: Any? = null
-    internal var stakeoutProximityCircles = mutableListOf<Any>()
-    internal var bullseyeOverlay: BullseyeOverlay? = null
+    internal var connectionLineOverlay: String? = null
+    internal var stakeoutProximityCircles = mutableListOf<String>()
+    internal var bullseyeOverlay: BullseyeView? = null
     internal var isInBullseyeMode: Boolean = false
     internal var autoFollowHandler: Handler? = null
     internal var previousStakeoutSheet: MappingFragmentLogic.SheetType? = null
@@ -156,8 +149,6 @@ class MappingFragment : Fragment() {
         setupMenuButton()
         setupLocationTracking()
         setupCompassOrientation()
-        preventDoubleTapZoomOnNonMapViews()
-        setupPointClickHandler()
         
         // Stakeout initialization
         logic.setupStakeoutMode()
@@ -227,22 +218,18 @@ class MappingFragment : Fragment() {
 
     internal fun cancelOngoingAnimations() = logic.cancelOngoingAnimations()
 
-    internal fun animateToLocationWithZoom(targetLocation: GeoPoint, targetZoom: Double) =
+    internal fun animateToLocationWithZoom(targetLocation: LatLng, targetZoom: Double) =
         logic.animateToLocationWithZoom(targetLocation, targetZoom)
 
     internal fun hideBottomNavigation() = logic.hideBottomNavigation()
 
     internal fun showBottomNavigation() = logic.showBottomNavigation()
 
-    private fun setupPointClickHandler() = logic.setupPointClickHandler()
 
-    internal fun ensurePointClickHandlerAtEnd() = logic.ensurePointClickHandlerAtEnd()
-
-    internal fun findNearestPoint(clickedGeoPoint: GeoPoint) = logic.findNearestPoint(clickedGeoPoint)
+    internal fun findNearestPoint(clickedLatLng: LatLng) = logic.findNearestPoint(clickedLatLng)
 
     internal fun updateLiveTrackingLine() = logic.updateLiveTrackingLine()
 
-    private fun preventDoubleTapZoomOnNonMapViews() = logic.preventDoubleTapZoomOnNonMapViews()
 
     internal fun updateMarkersForZoom() = logic.updateMarkersForZoom()
 
@@ -250,10 +237,6 @@ class MappingFragment : Fragment() {
 
     internal fun bringLocationMarkerToTop() = logic.bringLocationMarkerToTop()
 
-    private fun getVisibleLabelIndices(
-        points: List<LabeledPoint>,
-        projection: org.osmdroid.views.Projection
-    ) = logic.getVisibleLabelIndices(points, projection)
 
     private fun createPointOnlyBitmap(isSelected: Boolean = false) =
         logic.createPointOnlyBitmap(isSelected)
@@ -336,11 +319,9 @@ class MappingFragment : Fragment() {
         sensorManager = null
         orientationSensor = null
         sensorEventListener = null
-        mapController = null
-        locationMarker = null
         currentLocation = null
         targetLocation = null
-        rotationGestureOverlay = null
+        lastLocation = null
     }
 }
 
